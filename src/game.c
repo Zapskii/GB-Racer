@@ -78,13 +78,13 @@ uint8_t  g_steer, g_offroad, g_invuln, g_lap;
 uint16_t g_tenths, g_best_tenths;
 uint8_t  g_hits, g_speed_before_hit;
 
-static uint8_t  seg, f6, accel_tick, coast_tick, peeked, steer_hold, steer_extra;
+static uint8_t  seg, f6, accel_tick, coast_tick, peeked, steer_hold, steer_extra, steer_dir, steer_grace;
 static uint16_t seg_pos;
 
 static void reset_race_vars(void)
 {
     g_cam = g_curve = g_vcurve = g_speed = 0;
-    g_warn = g_warn_hot = peeked = steer_hold = steer_extra = 0;
+    g_warn = g_warn_hot = peeked = steer_hold = steer_extra = steer_dir = steer_grace = 0;
     g_hill = g_pitch = 0;
     g_zacc = 0;
     g_steer = g_offroad = g_invuln = g_speed_before_hit = 0;
@@ -169,6 +169,12 @@ static int16_t ease(int16_t v, int16_t t, int16_t d)   /* one frame of easing to
     return v;
 }
 
+static void clamp_cam(void)
+{
+    if (g_cam >  CAM_LIMIT) g_cam =  CAM_LIMIT;
+    if (g_cam < -CAM_LIMIT) g_cam = -CAM_LIMIT;
+}
+
 void game_update(uint8_t keys)
 {
     int16_t cap = g_offroad ? SPEED_OFFROAD : SPEED_MAX;
@@ -195,9 +201,20 @@ void game_update(uint8_t keys)
 #ifndef LEGACY_PHYSICS
     /* the longer you hold a direction the harder the car turns in: +1/64 per frame held, up to +STEER_RAMP/64 (50%) after half a second */
     {
-        uint8_t dir = (keys & J_RIGHT) ? 2 : ((keys & J_LEFT) ? 1 : 0);
-        if (dir && dir == g_steer) { if (steer_hold < STEER_RAMP) { steer_hold++; steer_extra += st >> 6; } }
-        else steer_hold = steer_extra = 0;                          /* (adds st/64 per frame held: no multiplication in the loop) */
+        uint8_t dir;
+        if (keys & J_RIGHT) dir = 2;
+        else if (keys & J_LEFT) dir = 1;
+        else dir = 0;
+        if (dir) {
+            if (dir == steer_dir) {
+                if (steer_hold < STEER_RAMP) { steer_hold++; steer_extra += st >> 6; }   /* (adds st/64 per frame held: no multiplication in the loop) */
+            } else {
+                steer_hold = steer_extra = 0; steer_dir = dir;
+            }
+            steer_grace = STEER_GRACE + 1;
+        } else if (steer_grace && !--steer_grace) {
+            steer_dir = 0;                 /* the release lasted longer than the grace: the next press starts fresh */
+        }
         st += steer_extra;
     }
     if (g_offroad) st >>= 4;                    /* on the grass the car steers at a sixteenth rate: leaving it costs more than the old push spiral */
@@ -261,8 +278,7 @@ void game_update(uint8_t keys)
     if (push < -PUSH_MAX) push = -PUSH_MAX;
 #endif
     g_cam -= push;
-    if (g_cam >  CAM_LIMIT) g_cam =  CAM_LIMIT;
-    if (g_cam < -CAM_LIMIT) g_cam = -CAM_LIMIT;
+    clamp_cam();
 
     off = g_cam >> 8;
     g_offroad = (off > OFFROAD_PX || off < -OFFROAD_PX);
@@ -282,7 +298,6 @@ void game_hit(void)
     g_invuln = INVULN_FRAMES;
 #ifndef TRAFFIC                                 /* bump: the cars shove each other apart (sprites.c moves the rival) */
     g_cam += g_hit_dx > 0 ? -BUMP_PX * 256 : BUMP_PX * 256;
-    if (g_cam >  CAM_LIMIT) g_cam =  CAM_LIMIT;
-    if (g_cam < -CAM_LIMIT) g_cam = -CAM_LIMIT;
+    clamp_cam();
 #endif
 }

@@ -22,6 +22,7 @@
 #define VIS_EASE       4           /* the drawn curvature eases twice as fast as the real one: the bend shows up in ~20 frames */
 #define PUSH_MAX       1600        /* the most a bend can push the car sideways in one frame, 1/256 px (about 6 px; uncapped a hairpin at full speed pushed 10 px a frame) */
 #define STEER_RAMP     32          /* frames of held steering that add (frames/64) to the turn rate: up to +50% */
+#define STEER_GRACE    6           /* frames a release keeps the ramp: a short neutral gap does not reset the turn rate */
 #define WARN_MIN       40          /* bends at least this sharp get a sign */
 #define INVULN_FRAMES  60
 #define BUMP_PX        6           /* a collision shoves the player this far sideways (and the rival twice as far in lane units) */

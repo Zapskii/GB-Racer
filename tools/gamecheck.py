@@ -64,6 +64,7 @@ class Model:
         s.cam = s.curve = s.speed = 0
         s.zacc = 0
         s.steer = s.offroad = s.invuln = s.hits = s.before = s.hit_dx = s.hold = s.extra = 0
+        s.steer_dir = s.grace = 0
         s.lap = 1
         s.tenths = s.best = 0
         s.seg = s.f6 = s.accel = s.coast = 0
@@ -135,12 +136,19 @@ class Model:
                 s.speed = cap
         st = (80 if brk == "steer" else 160) + s.speed * (2 if brk == "steer" else 4)
         d = 2 if keys & RIGHT else (1 if keys & LEFT else 0)         # holding a direction turns harder: +1/64 per frame, up to 32
-        if d and d == s.steer:
-            if s.hold < 32:
-                s.hold += 1
-                s.extra += st >> 6
-        else:
-            s.hold = s.extra = 0
+        if d:
+            if d == s.steer_dir:
+                if s.hold < 32:
+                    s.hold += 1
+                    s.extra += st >> 6
+            else:
+                s.hold = s.extra = 0
+                s.steer_dir = d
+            s.grace = 7                                              # STEER_GRACE + 1: 6 neutral frames still continue the ramp
+        elif s.grace:
+            s.grace -= 1                                             # keep the ramp across a short release
+            if not s.grace:
+                s.steer_dir = 0                                      # the gap outlasted the grace: the next press starts fresh
         if brk != "ramp":
             st += s.extra
         if s.offroad:

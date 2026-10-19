@@ -59,6 +59,7 @@ check: all variants
 	$(PYTHON) tools/brakecheck.py build/prof_race.gb
 	$(PYTHON) tools/levelcheck.py build/prof_race.gb
 	$(PYTHON) tools/offroadcheck.py build/prof_race.gb
+	$(PYTHON) tools/steercheck.py build/prof_race.gb
 	$(PYTHON) tools/flickercheck.py build/prof_race.gb
 	$(PYTHON) tools/audiostatecheck.py build/prof_flow.gb
 
