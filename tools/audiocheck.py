@@ -185,8 +185,12 @@ for k in range(30, len(eng.calls) - 1, 3):
         continue
     x = eng.seg(t0, t1)
     idx = (sp * 3) >> 5
-    f = acf_period_hz(x, 25, 400)
     exp = ladder_hz(idx)
+    # Step 0's LFSR subharmonic is ~10.75 Hz: below the ACF band (25..400) and longer
+    # than the 4-tick window, so it is not measurable here.  The standstill test covers it.
+    if exp < 25:
+        continue
+    f = acf_period_hz(x, 25, 400)
     checked += 1
     seen_idx.add(idx)
     if abs(f / exp - 1) > 0.06:

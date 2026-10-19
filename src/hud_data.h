@@ -2,7 +2,7 @@
 #ifndef HUD_DATA_H
 #define HUD_DATA_H
 
-#define HUD_GLYPHS 40
+#define HUD_GLYPHS 41
 #define F_SPACE 0
 #define F_S 11
 #define F_P 12
@@ -33,6 +33,7 @@
 #define F_SLASH 37
 #define F_LT 38
 #define F_GT 39
+#define F_Q 40
 #define F_DIGIT0 1   /* digits are consecutive */
 
 extern const unsigned char hud_font[];

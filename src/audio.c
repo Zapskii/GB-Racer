@@ -24,6 +24,8 @@ typedef struct {
     uint8_t left;                      /* rows left in the current note */
 } voice_t;
 
+uint8_t g_sound_on = 1;                 /* pause menu: 0 mutes music and effects (runtime only, not saved) */
+
 static voice_t lead, harm, bass;
 static uint8_t row_tick;
 static uint8_t nr51 = NR51_NO_CH4;      /* panning: channel 4 is switched off here when the engine is silent */
@@ -214,8 +216,8 @@ void audio_update(int16_t speed, uint8_t offroad, uint8_t hits)
 {
     audio_step(speed, offroad, hits);
 #ifdef PROFILE
-    NR51_REG = nr51 & dbg_audio_solo;
+    NR51_REG = g_sound_on ? (nr51 & dbg_audio_solo) : 0;
 #else
-    NR51_REG = nr51;
+    NR51_REG = g_sound_on ? nr51 : 0;
 #endif
 }

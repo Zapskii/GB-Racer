@@ -2,6 +2,8 @@
 #define AUDIO_H
 #include <stdint.h>
 
+extern uint8_t g_sound_on;            /* 0 = muted (pause menu SOUND OFF) */
+
 void audio_init(void);
 /* Once per frame, after game_update/sprites_update.  A changed `hits` count is a crash. */
 void audio_update(int16_t speed, uint8_t offroad, uint8_t hits);

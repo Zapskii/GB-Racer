@@ -14,12 +14,14 @@
 static uint8_t last_lap_seen = 1;
 static uint8_t last_place = 3;      /* race position last frame, for the OVERTAKEN! / PASSED! banner */
 static uint8_t ban_tick;            /* frames of banner left */
+static uint8_t pause_sel;           /* pause menu item 0..3 */
 
 void flow_show_title(void)
 {
     g_state = ST_TITLE;
     HIDE_SPRITES;
     road_enable(0);
+    SWITCH_ROM_MBC1(1);             /* hud_title/hud_title_laps live in bank 1 */
     hud_title();
 }
 
@@ -42,6 +44,7 @@ static void start_race(void)
 void flow_menu(uint8_t pressed)
 {
     if (g_state == ST_TITLE) {
+        /* bank 1 is already mapped by flow_show_title(): hud_title_laps is in bank 1 */
         if ((pressed & J_UP) && g_track > 0)                       { g_track--; hud_title_laps(); }
         if ((pressed & J_DOWN) && g_track < N_TRACKS - 1)          { g_track++; hud_title_laps(); }
         if ((pressed & J_LEFT) && g_laps_sel > 0)                  { g_laps_sel--; hud_title_laps(); }
@@ -100,23 +103,61 @@ void flow_after_update(void)
         }
         if (++g_fin_tick >= FINISH_COAST) {
             game_finish_record();
+            road_enable(0);
+            SWITCH_ROM_MBC1(1);     /* hud_results lives in bank 1 */
             hud_results();
             HIDE_SPRITES;
-            road_enable(0);
             g_state = ST_RESULTS;
         }
     }
 }
 
-/* START during a race pauses / resumes.  Returns 1 while paused (the main loop then skips the whole update:
-   the picture, tables and audio state stay as they were). */
+/* START during a race opens the pause menu.  Returns 1 while paused (the main loop then skips the whole update:
+   the picture, tables and audio state stay as they were).  Item 3 is the sound toggle, so 0..3 wraps. */
 uint8_t flow_pause(uint8_t pressed)
 {
     if (g_state != ST_RACE) { g_paused = 0; return 0; }
-    if (pressed & J_START) {
-        g_paused ^= 1;
-        if (g_paused) hud_banner("      PAUSED");
-        else          hud_request_race_screen();
+
+    if (!g_paused) {
+        if (pressed & J_START) {
+            g_paused = 1;
+            pause_sel = 0;
+            hud_pause_menu(pause_sel, g_sound_on);
+            return 1;
+        }
+        return 0;
     }
-    return g_paused;
+
+    if (pressed & J_UP) {
+        pause_sel = pause_sel ? pause_sel - 1 : 3;
+        hud_pause_menu(pause_sel, g_sound_on);
+    } else if (pressed & J_DOWN) {
+        pause_sel = pause_sel == 3 ? 0 : pause_sel + 1;
+        hud_pause_menu(pause_sel, g_sound_on);
+    }
+
+    if (pressed & (J_A | J_START)) {
+        if (pause_sel == 0) {                   /* RESUME */
+            g_paused = 0;
+            hud_request_race_screen();
+            return 0;
+        }
+        if (pause_sel == 1) {                   /* RESTART */
+            g_paused = 0;
+            start_race();
+            return 1;
+        }
+        if (pause_sel == 2) {                   /* QUIT */
+            g_paused = 0;
+            flow_show_title();
+            return 1;
+        }
+        g_sound_on ^= 1;                        /* SOUND ON / OFF */
+        hud_pause_menu(pause_sel, g_sound_on);
+    } else if (pressed & J_B) {                 /* B resumes from anywhere in the menu */
+        g_paused = 0;
+        hud_request_race_screen();
+        return 0;
+    }
+    return 1;
 }

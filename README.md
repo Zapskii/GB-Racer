@@ -13,7 +13,11 @@ two racing rivals plus random traffic, lap times and per-track/level/length reco
 | UP / DOWN: track | LEFT / RIGHT: steer |
 | LEFT / RIGHT: laps | A or UP: accelerate |
 | SELECT: difficulty | B or DOWN: brake (works while accelerating) |
-| START: start race | START: pause / resume |
+| START: start race | START: pause menu |
+
+While paused, UP / DOWN select RESUME, RESTART, QUIT or SOUND ON/OFF; A or START activates the
+item and B resumes.  SOUND mutes music and effects for the rest of the session (it is runtime only,
+not saved).
 
 The brake wins over the throttle, so you can hold A and tap B to slow for a bend.
 Difficulty also changes the car, not just the AI: the corner push is 0.75x on EASY,

@@ -289,8 +289,8 @@ void main(void)
             continue;
         }
         if (flow_pause(pressed)) {         /* paused: the frame stays as it is (road ISR keeps using the last tables) */
-            hud_update();
-            audio_update(0, 0, g_hits);    /* same as above: pausing must not look like a collision */
+            audio_update(0, 0, g_hits);    /* same as above: pausing must not look like a collision; no hud_update:
+                                              it would overwrite the pause menu */
             wait_vbl_done();
             continue;
         }

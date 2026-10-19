@@ -13,7 +13,7 @@ LCC     = $(GBDK)/bin/lcc
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 OPT     = -Wf--opt-code-size          # bank 0 is full: the PROFILE builds spill into bank 1 without it
 CART    = -Wm-yt0x03 -Wm-yo4 -Wm-ya1  # MBC1 + RAM + battery, 64 KB ROM (3 palette banks), 8 KB save RAM
-SRC     = src/main.c src/game.c src/hud.c src/sprites.c src/raster.s src/draw.s src/road_data.c src/pat_rows.s src/pat_rows2.s src/pat_rows3.s src/sprite_data.c src/sprite_tab.c src/hud_data.c src/hud_tab.c src/audio.c src/audio_data.c src/flow.c src/sram.c
+SRC     = src/main.c src/game.c src/hud.c src/menus.c src/sprites.c src/raster.s src/draw.s src/road_data.c src/pat_rows.s src/pat_rows2.s src/pat_rows3.s src/sprite_data.c src/sprite_tab.c src/hud_data.c src/hud_tab.c src/audio.c src/audio_data.c src/flow.c src/sram.c
 HDR     = $(wildcard src/*.h)
 ROADGEN = src/road_data.c src/road_data.h src/pat_rows.s src/pat_rows2.s src/pat_rows3.s
 SPRGEN  = src/sprite_data.c src/sprite_tab.c src/sprite_data.h
@@ -62,6 +62,7 @@ check: all variants
 	$(PYTHON) tools/steercheck.py build/prof_race.gb
 	$(PYTHON) tools/flickercheck.py build/prof_race.gb
 	$(PYTHON) tools/audiostatecheck.py build/prof_flow.gb
+	$(PYTHON) tools/pausecheck.py build/prof_flow.gb
 
 # full: everything above plus the behaviour/DSP/save suites
 test: check

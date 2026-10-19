@@ -24,7 +24,7 @@ static uint8_t glyph(char c)
 
 static void put_text(uint8_t x, uint8_t y, const char *s)
 {
-    uint8_t t[20], n = 0;
+    uint8_t t[21], n = 0;           /* 21: the pause menu writes a full 20-char row */
     while (*s) t[n++] = GT(glyph(*s++));
     set_win_tiles(x, y, n, 1, t);
 }
@@ -50,20 +50,6 @@ static void draw_time(uint8_t x, uint8_t y, uint16_t tenths)
     t[0] = DIGIT(m); t[1] = GT(F_COLON); t[2] = DIGIT(s10); t[3] = DIGIT(s1);
     t[4] = GT(F_DOT); t[5] = DIGIT(tenths);
     set_win_tiles(x, y, 6, 1, t);
-}
-
-/* mm:ss.t for whole races; saturates at 99:59.9 */
-static void draw_total(uint8_t x, uint8_t y, uint16_t tenths)
-{
-    uint8_t t[7], m10 = 0, m1 = 0, s10 = 0, s1 = 0;
-    if (tenths > 59999u) tenths = 59999u;
-    while (tenths >= 6000) { tenths -= 6000; m10++; }
-    while (tenths >= 600)  { tenths -= 600;  m1++; }
-    while (tenths >= 100)  { tenths -= 100;  s10++; }
-    while (tenths >= 10)   { tenths -= 10;   s1++; }
-    t[0] = DIGIT(m10); t[1] = DIGIT(m1); t[2] = GT(F_COLON); t[3] = DIGIT(s10); t[4] = DIGIT(s1);
-    t[5] = GT(F_DOT); t[6] = DIGIT(tenths);
-    set_win_tiles(x, y, 7, 1, t);
 }
 
 static void clear_rows(uint8_t y0, uint8_t y1)
@@ -141,68 +127,24 @@ void hud_update(void)
     }
 }
 
-/* ---- full-screen pages: the window covers the whole display ---- */
-static void put_track_name(uint8_t x, uint8_t y)
+/* ---- pause menu: two rows in the bottom window (lines 128..143) ---- */
+/* one 10-char slot: the marker, the label, then spaces */
+static void menu_slot(char *p, uint8_t sel, const char *label)
 {
-    char t[9];
-    uint8_t i = 0;
-    const char *n = track_name[g_track];
-    while (n[i]) { t[i] = n[i]; i++; }
-    while (i < 8) t[i++] = ' ';
-    t[8] = 0;
-    put_text(x, y, t);
+    uint8_t n = 0;
+    p[n++] = sel ? '>' : ' ';
+    while (*label && n < 10) p[n++] = *label++;
+    while (n < 10) p[n++] = ' ';
 }
 
-void hud_title_laps(void)
+void hud_pause_menu(uint8_t sel, uint8_t sound)
 {
-    char t[9];
-    uint8_t i = 0;
-    const char *n = level_name[g_level];
-    put_text(3, 4, "TRACK");
-    put_track_name(9, 4);
-    put_text(5, 6, "LAPS <");
-    draw_number(12, 6, lap_options[g_laps_sel], 2);
-    put_text(14, 6, " >");
-    put_text(3, 8, "LEVEL");
-    while (n[i]) { t[i] = n[i]; i++; }
-    while (i < 8) t[i++] = ' ';
-    t[8] = 0;
-    put_text(9, 8, t);
-    put_text(4, 10, "BEST");
-    if (g_best_total[g_level][g_track][g_laps_sel])
-        draw_total(9, 10, g_best_total[g_level][g_track][g_laps_sel]);
-    else
-        put_text(9, 10, "--:--.-");
-}
-
-void hud_title(void)
-{
-    clear_rows(0, 18);
-    put_text(6, 2, "GB RACER");
-    put_text(3, 12, "UP DOWN TRACK");
-    put_text(3, 13, "LEFT RIGHT LAPS");
-    put_text(3, 14, "SELECT LEVEL");
-    put_text(3, 15, "A GAS  B BRAKE");
-    put_text(4, 17, "PRESS START");
-    hud_title_laps();
-    WY_REG = 0;
-}
-
-void hud_results(void)
-{
-    clear_rows(0, 18);
-    put_text(6, 3, "FINISH!");
-    put_track_name(6, 4);
-    put_text(3, 6, "TIME");
-    draw_total(9, 6, g_race_tenths);
-    put_text(3, 8, "BEST LAP");
-    draw_time(12, 8, g_best_tenths);
-    put_text(4, 10, "PLACE   OF 3");
-    { uint8_t t = DIGIT(g_place); set_win_tiles(10, 10, 1, 1, &t); }
-    if (g_place == 1)
-        put_text(6, 12, "YOU WIN!");
-    if (g_new_record)
-        put_text(4, 13, "NEW RECORD!");
-    put_text(4, 15, "PRESS START");
-    WY_REG = 0;
+    char r0[21], r1[21];
+    menu_slot(r0,     sel == 0, "RESUME");
+    menu_slot(r0 + 10, sel == 1, "RESTART");
+    menu_slot(r1,     sel == 2, "QUIT");
+    menu_slot(r1 + 10, sel == 3, sound ? "SOUND ON" : "SOUND OFF");
+    r0[20] = r1[20] = 0;
+    put_text(0, 0, r0);
+    put_text(0, 1, r1);
 }

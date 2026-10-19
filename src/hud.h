@@ -13,8 +13,9 @@ void hud_update(void);
 void hud_race_screen(void);          /* race layout (resets the cached values), window at line 128 */
 void hud_banner(const char *text);   /* replaces row 0 (<= 20 chars) until hud_race_screen(); drawn by the next hud_update */
 void hud_request_race_screen(void);  /* hud_race_screen() at the next hud_update (VBlank), for use mid-frame */
-void hud_title(void);                /* title page, window at line 0 */
-void hud_title_laps(void);           /* redraw the lap selector and best time after the choice changed */
-void hud_results(void);              /* results page from g_race_tenths, g_best_tenths, g_new_record */
+void hud_title(void);                /* title page, window at line 0 (bank 1) */
+void hud_title_laps(void);           /* redraw the lap selector and best time after the choice changed (bank 1) */
+void hud_results(void);              /* results page from g_race_tenths, g_best_tenths, g_new_record (bank 1) */
+void hud_pause_menu(uint8_t sel, uint8_t sound);   /* race pause menu, two 20-char rows in the bottom window */
 
 #endif
