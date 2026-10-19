@@ -1,0 +1,31 @@
+name: build-and-test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GBDK: ${{ github.workspace }}/vendor/gbdk
+      SDL_VIDEODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install GBDK 4.5.0
+        run: |
+          mkdir -p vendor
+          curl -L --fail -o /tmp/gbdk.tar.gz \
+            https://github.com/gbdk-2020/gbdk-2020/releases/download/4.5.0/gbdk-linux64.tar.gz
+          tar -xzf /tmp/gbdk.tar.gz -C vendor
+
+      - name: Install PyBoy
+        run: pip install pyboy pillow
+
+      - name: Build and run the full suite
+        run: make test
