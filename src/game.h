@@ -18,11 +18,15 @@
 #define ACCEL_FAST     48          /* below this speed the car gains 1 per frame, above it 1 per 2 frames */
 #define GRASS_DRAG     8           /* speed lost per frame while over the grass cap */
 #endif
-#define LEAD_FRAMES    48          /* the road bends this many frames of driving before the push starts (not in LEGACY_PHYSICS builds); game.c hard-codes 48 = 32 + 16 */
-#define VIS_EASE       4           /* the drawn curvature eases twice as fast as the real one: the bend shows up in ~20 frames */
+#define LEAD_FRAMES    48          /* the warning sign appears this many frames of driving before the bend (not in LEGACY_PHYSICS builds); game.c hard-codes 48 = 32 + 16 */
+#define CURVE_EASE     2           /* the road's curvature eases this far per frame: a bend is felt over ~45 frames */
 #define PUSH_MAX       1600        /* the most a bend can push the car sideways in one frame, 1/256 px (about 6 px; uncapped a hairpin at full speed pushed 10 px a frame) */
 #define STEER_RAMP     32          /* frames of held steering that add (frames/64) to the turn rate: up to +50% */
 #define STEER_GRACE    6           /* frames a release keeps the ramp: a short neutral gap does not reset the turn rate */
+#define GRIP           256         /* the tyres close on the asked-for sideways rate this fast (1/256 px per frame^2): two frames to full lock */
+#define LAT_DECAY      48          /* the sideways rate bleeds off this fast when the wheel is released */
+#define COAST_SHIFT    5           /* coasting loses 1 + (speed >> COAST_SHIFT) every 8 frames: drag grows with the speed */
+#define HILL_PULL      1           /* the slope's pull on the speed, Q8: 256 = one speed point per frame */
 #define WARN_MIN       40          /* bends at least this sharp get a sign */
 #define INVULN_FRAMES  60
 #define BUMP_PX        6           /* a collision shoves the player this far sideways (and the rival twice as far in lane units) */
@@ -43,7 +47,7 @@ extern const uint8_t lap_options[N_LAP_OPTIONS];   /* 3, 5, 10 */
 /* All plain globals so the emulator tests can read them by symbol. */
 extern int16_t  g_cam;             /* road offset at the bottom line, 1/256 px (right = positive) */
 extern int16_t  g_curve;           /* current road curvature (eased towards the segment's value)   */
-extern int16_t  g_vcurve;          /* the curvature that is DRAWN: g_curve, but ahead of it (see LEAD_FRAMES) */
+extern int16_t  g_vcurve;          /* the curvature that is DRAWN: the same bend the car feels (g_curve) */
 extern int8_t   g_warn;            /* upcoming sharp bend: sign = direction (+ right), magnitude 1..3 = chevrons, 0 = none */
 extern uint8_t  g_warn_hot;        /* ... and you are too fast for it: the sign flashes */
 extern int16_t  g_speed;

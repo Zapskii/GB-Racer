@@ -69,6 +69,7 @@ test: check
 	$(PYTHON) tools/gamecheck.py build/prof_flow.gb
 	$(PYTHON) tools/racecheck.py build/prof_race.gb
 	$(PYTHON) tools/cornercheck.py build/prof_race.gb
+	$(PYTHON) tools/phasecheck.py build/prof_race.gb
 	$(PYTHON) tools/postcheck.py build/prof_race.gb
 	$(PYTHON) tools/spritecheck.py build/prof_race.gb
 	$(PYTHON) tools/hillcheck.py build/prof_asm.gb

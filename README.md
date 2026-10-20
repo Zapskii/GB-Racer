@@ -27,6 +27,20 @@ Difficulty also changes the car, not just the AI: the corner push is 0.75x on EA
 capped at 8 and steering drops to 1/16; the centrifugal push is disabled there, so a
 mistake costs time without throwing you further out.
 
+The car has weight. Steering asks for a sideways rate and the tyres take a couple of
+frames to build it up, so the car keeps sliding for a moment after you let go and
+counter-steers into a slide rather than snapping to the road. Holding a direction
+makes the car turn harder the longer you hold it. Coasting slows you more the faster
+you go, and a climb bleeds speed off while a descent gives it back.
+
+The road you see and the road the car feels are the same bend, eased in over about
+three quarters of a second.  They used to differ: the picture led the physics by the
+next segment's curvature, so at a sharp change of direction the car was being thrown
+off the outside of the bend it was really in while the player was steering into the
+bend they could see.  `tools/phasecheck.py` now guards that they stay in phase; the
+advance warning lives in the sky sign instead, which shows the next bend before you
+reach it.
+
 ## Building
 
 Requires [GBDK-2020](https://github.com/gbdk-2020/gbdk-2020/releases) and Python 3 (the asset
@@ -59,7 +73,8 @@ If the venv lives elsewhere: `make check PYTHON=/path/to/python`.
 The regression checks added by the upgrade are `tools/brakecheck.py` (A+B must slow the car),
 `tools/levelcheck.py` (EASY/NORMAL/HARD scale the push), `tools/offroadcheck.py` (the push is
 gone once the grass cap applies), `tools/steercheck.py` (the steering ramp survives a short
-release), `tools/flickercheck.py` (a rival hidden by the OAM multiplexer must not collide),
+release), `tools/phasecheck.py` (the road the player sees and the road the car feels are
+the same bend), `tools/flickercheck.py` (a rival hidden by the OAM multiplexer must not collide),
 `tools/audiostatecheck.py` (title/pause must pass `g_hits`, not 0, to `audio_update`) and
 `tools/pausecheck.py` (pause menu, sound mute, restart and quit).  The older tools each cover
 one subsystem; many support `--break <name>` to prove the check can fail on a deliberately
@@ -95,7 +110,7 @@ bench/          cycle benchmark (development artifact; see bench/Makefile)
 ### Memory map
 
 - Bank 0: code and runtime data.  Must end below `$4000` (`tools/romcheck.py`), with at least
-  64 bytes headroom; the current release has ~742 bytes free.
+  64 bytes headroom; the current build has 163 bytes free.
 - Bank 1: boot-time data (road/sprite/font), the full-screen menu code (`src/menus.c`) and the
   CANYON palette rows at `$6000`.
 - Banks 2/3: OVAL/ALPINE palette rows at `$6000`.

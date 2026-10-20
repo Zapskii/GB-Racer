@@ -6,10 +6,17 @@
  * Track      16 segments (length per track, SEG_LEN) each; the curvature eases towards the
  *            current segment's value.  The player's distance advances at g_speed per frame, the same
  *            rate the stripes scroll, so segment changes line up with what you see.
+ *            The road the player SEES and the bend that pushes the car are the same one
+ *            (g_vcurve = g_curve): they must never disagree, or the car is thrown off the
+ *            outside of the bend it is really in while the player steers into the one they
+ *            can see.  The advance warning is the sky sign, not the road's shape.
  *
- * Physics    * steering is weaker at low speed
- *            * curves push the car towards the outside, in proportion to speed * curvature
- *            * more than OFFROAD_PX from the road centre = on the grass: speed is capped
+ * Physics    * steering is weaker at low speed, and the tyres take a couple of frames to
+ *              build the sideways rate up (g_lat), so the car slides on and washes out
+ *            * curves push the car towards the outside, in proportion to speed^3 * curvature
+ *            * more than OFFROAD_PX from the road centre = on the grass: speed is capped and
+ *              the steering and the slide are both throttled
+ *            * the slope pulls on the speed; coasting drags harder the faster you go
  */
 #include <gb/gb.h>
 #include "game.h"
@@ -77,13 +84,17 @@ uint16_t g_zacc;
 uint8_t  g_steer, g_offroad, g_invuln, g_lap;
 uint16_t g_tenths, g_best_tenths;
 uint8_t  g_hits, g_speed_before_hit;
+int16_t  g_lat;                     /* the car's sideways speed, 1/256 px per frame (the tyres have to build it up) */
 
 static uint8_t  seg, f6, accel_tick, coast_tick, peeked, steer_hold, steer_extra, steer_dir, steer_grace;
 static uint16_t seg_pos;
+static int16_t  hill_pull;                /* the slope's pull on the speed, Q8 (the fraction carries over) */
 
 static void reset_race_vars(void)
 {
     g_cam = g_curve = g_vcurve = g_speed = 0;
+    g_lat = 0;
+    hill_pull = 0;
     g_warn = g_warn_hot = peeked = steer_hold = steer_extra = steer_dir = steer_grace = 0;
     g_hill = g_pitch = 0;
     g_zacc = 0;
@@ -188,8 +199,16 @@ void game_update(uint8_t keys)
         if ((g_speed < ACCEL_FAST || (accel_tick & 1) == 0) && g_speed < cap)
             g_speed++;
     } else if (((++coast_tick) & 7) == 0 && g_speed > 0) {
-        g_speed--;                              /* coasting */
+        g_speed -= 1 + (g_speed >> COAST_SHIFT);   /* coasting: the drag grows with the speed */
     }
+#ifndef HILLS_OFF
+    /* the slope pulls on the speed: climbing (g_hill < 0) bleeds it off, descending gives it back.
+       The pull is Q8 and the fraction carries over, so a gentle slope costs a little and a steep
+       one costs a lot.  g_hill is last frame's pitch, so the pull lags the road by a frame. */
+    hill_pull += (int16_t)g_hill * HILL_PULL;
+    if (hill_pull >= 256)      { g_speed++; hill_pull -= 256; }
+    else if (hill_pull <= -256) { g_speed--; hill_pull += 256; }
+#endif
     if (g_speed < 0) g_speed = 0;
     if (g_speed > cap) {                        /* e.g. just drove onto the grass */
         g_speed -= GRASS_DRAG;                  /* the grass drags hard */
@@ -218,10 +237,35 @@ void game_update(uint8_t keys)
         st += steer_extra;
     }
     if (g_offroad) st >>= 4;                    /* on the grass the car steers at a sixteenth rate: leaving it costs more than the old push spiral */
+    if (g_offroad) g_lat >>= 4;                /* the grass throttles the slide too: without this the momentum lets the car wash back onto the road for free */
 #endif
     g_steer = 0;
-    if (keys & J_LEFT)  { g_cam -= st; g_steer = 1; }
-    if (keys & J_RIGHT) { g_cam += st; g_steer = 2; }
+    if (keys & J_LEFT)  { g_steer = 1; }
+    if (keys & J_RIGHT) { g_steer = 2; }
+#ifdef LEGACY_PHYSICS
+    if (g_steer == 1)  g_cam -= st;
+    if (g_steer == 2)  g_cam += st;
+#else
+    /* ---- lateral momentum: the tyres have to build the sideways rate up, and it bleeds off ----
+       g_lat is the car's sideways speed in 1/256 px per frame, signed: positive = sliding right.
+       The wheel asks for +st (right) or -st (left); the tyres close on that rate at GRIP per
+       frame, and with the wheel centred the rate decays by LAT_DECAY.  The car slides when the
+       wheel is released (it keeps going, then washes out) and a bend is held by counter-steering
+       into the slide, not by the car being a cursor the bend pushes around. */
+    {
+        int16_t want = 0;
+        if (g_steer == 2) want = st;
+        else if (g_steer == 1) want = -st;
+        if (want) {                              /* the tyres close on the asked-for rate */
+            if (g_lat < want) { g_lat += GRIP; if (g_lat > want) g_lat = want; }
+            else              { g_lat -= GRIP; if (g_lat < want) g_lat = want; }
+        } else {                                 /* the wheel is centred: the car washes out */
+            g_lat += (g_lat > 0) ? -LAT_DECAY : LAT_DECAY;
+            if (g_lat >= -LAT_DECAY && g_lat <= LAT_DECAY) g_lat = 0;
+        }
+        g_cam += g_lat;
+    }
+#endif
 
     /* ---- track position and curvature ---- */
     seg_pos += (uint16_t)g_speed;
@@ -234,18 +278,26 @@ void game_update(uint8_t keys)
                 lap_done();
         }
     }
-    g_curve = ease(g_curve, track_curve[g_track][seg], 2);
 #ifdef LEGACY_PHYSICS
+    g_curve = ease(g_curve, track_curve[g_track][seg], 2);
     g_vcurve = g_curve;
 #else
-    /* Advance warning: the road you SEE starts bending LEAD_FRAMES frames' worth of driving before the push begins (the picture
-       follows the next segment's curvature once it is that close; the car still feels the real one).  Once the next segment is in
-       view it stays in view until you reach it, so braking does not make the bend "unwind".  A sign in the sky shows the bend's
-       direction and sharpness and flashes while you are faster than the bend allows (g_warn: +- 1..3 chevrons, 0 none). */
+    /* One curvature for the road and for the car.  The picture and the push must agree:
+       if the drawn road bends one way and the push acts the other way, the car is thrown
+       off the outside of the bend the player is looking at, and a "sharp left then sharp
+       right" corner is felt as a straight run off the road.  Pole Position (1982) works
+       the same way: the curve is sampled at the car's own position and the visual road
+       uses the same data, so the picture and the physics are in phase.  The road's shape
+       eases in over ~45 frames (CURVE_EASE per frame), so the bend is seen before it is
+       fully felt.
+
+       Advance warning lives in the SIGN, not in the road's shape: the sky sign shows the
+       next segment's bend once it is LEAD_FRAMES frames of driving away, and keeps
+       showing it (braking does not make the bend "unwind").  It flashes while you are
+       faster than the bend allows (g_warn: +- 1..3 chevrons, 0 none). */
     if (!peeked && seg_pos + (uint16_t)((g_speed << 5) + (g_speed << 4)) >= SEG_LEN(g_track))
         peeked = 1;
     target = track_curve[g_track][peeked ? (seg + 1) & (SEG_COUNT - 1) : seg];
-    g_vcurve = ease(g_vcurve, target, VIS_EASE);
     g_warn = 0;
     if (peeked && (target >= WARN_MIN || target <= -WARN_MIN)) {
         uint8_t m = (uint8_t)(target < 0 ? -target : target);
@@ -253,6 +305,8 @@ void game_update(uint8_t keys)
         g_warn_hot = g_speed > (n == 1 ? 72 : (n == 2 ? 62 : 52));
         g_warn = target < 0 ? -(int8_t)n : (int8_t)n;
     }
+    g_curve = ease(g_curve, track_curve[g_track][seg], CURVE_EASE);
+    g_vcurve = g_curve;                        /* the picture and the push are the same bend */
 #endif
 
     /* ---- hill pitch: ease towards the segment's value, one step per frame ---- */

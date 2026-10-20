@@ -68,7 +68,7 @@ def acf_period_hz(x, lo=30, hi=400):
     return SR / (a + int(np.argmax(seg)))
 
 class Run:
-    def __init__(self, solo):
+    def __init__(self, solo, music_off=0):
         self.pb = PyBoy(str(rom), window="null", sound_emulated=True)
         self.pb.set_emulation_speed(0)
         self.mem = self.pb.memory
@@ -76,6 +76,7 @@ class Run:
         self.tick_no = 0
         self.calls = []                           # (tick, lap, hits, speed, offroad)
         self.solo = solo
+        self.music_off = music_off
         self.pb.hook_register(0, syms["_audio_update"], self.on_call, None)
         self.sample_pos = [0]
 
@@ -85,7 +86,10 @@ class Run:
         self.calls.append((self.tick_no, m[syms["_g_lap"]], m[syms["_g_hits"]], sp, m[syms["_g_offroad"]]))
 
     def tick(self):
+        # both flags every tick: the ROM's startup zeroes 0xC0A0..0xC19A (the debug flags live there),
+        # and it only boots at ~frame 65, so a one-off write before the boot is silently wiped
         self.mem[syms["_dbg_audio_solo"]] = self.solo
+        self.mem[syms["_dbg_audio_music_off"]] = self.music_off
         self.pb.tick()
         a = self.pb.sound.ndarray.astype(np.float32).mean(axis=1)
         self.audio.append(a)
@@ -238,8 +242,7 @@ else:
 eng.pb.stop(save=False)
 
 # lap jingle on channel 2 alone, music silenced so only the jingle can sound; drive until the lap changes
-lap = Run(0x22)
-lap.mem[syms["_dbg_audio_music_off"]] = 1
+lap = Run(0x22, music_off=1)
 for _ in range(40):
     lap.tick()
 lap_idx = None

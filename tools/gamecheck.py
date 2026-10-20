@@ -4,6 +4,7 @@ Game-logic check, run from hooks on the real ROM (PROFILE build).
 
 At every entry of game_update() (keys read from register A):
   1. STATE   all g_* globals equal an independent Python model of game_update/game_hit
+             (the model includes the lateral momentum, the coasting drag and the slope's pull)
   2. HIT     game_hit() was called on the previous loop iff the rival geometry (rv[] in WRAM) overlaps
              the player and the player was not invulnerable; every hit also overlaps for real
              (rival body within the player car's rows and columns, no slack)
@@ -63,6 +64,7 @@ class Model:
     def __init__(s):
         s.cam = s.curve = s.speed = 0
         s.zacc = 0
+        s.lat = 0
         s.steer = s.offroad = s.invuln = s.hits = s.before = s.hit_dx = s.hold = s.extra = 0
         s.steer_dir = s.grace = 0
         s.lap = 1
@@ -70,6 +72,7 @@ class Model:
         s.seg = s.f6 = s.accel = s.coast = 0
         s.seg_pos = 0
         s.hill = s.pitch = 0
+        s.hill_pull = 0
         s.level = 1
         s.track = 1
         s.state, s.laps_total, s.diff, s.cd, s.cd_tick, s.fin_tick, s.race_tenths = COUNTDOWN, 3, 0, 3, 0, 0, 0
@@ -127,7 +130,14 @@ class Model:
         else:
             s.coast = (s.coast + 1) & 255
             if (s.coast & (6 if brk == "speed" else 7)) == 0 and s.speed > 0:
-                s.speed -= 1
+                s.speed -= 1 + (s.speed >> 5)                        # coasting: the drag grows with the speed
+        s.hill_pull += s.hill                                        # the slope pulls on the speed, Q8 (g_hill is last frame's pitch)
+        if s.hill_pull >= 256:
+            s.speed += 1
+            s.hill_pull -= 256
+        elif s.hill_pull <= -256:
+            s.speed -= 1
+            s.hill_pull += 256
         if s.speed < 0:
             s.speed = 0
         if s.speed > cap:
@@ -153,13 +163,27 @@ class Model:
             st += s.extra
         if s.offroad:
             st >>= 4
+            s.lat >>= 4                                        # the grass throttles the slide too (the ROM does the same)
         s.steer = 0
         if keys & LEFT:
-            s.cam -= st
             s.steer = 1
         if keys & RIGHT:
-            s.cam += st
             s.steer = 2
+        want = st if s.steer == 2 else (-st if s.steer == 1 else 0)
+        if want:                                                     # the tyres close on the asked-for sideways rate
+            if s.lat < want:
+                s.lat += 256
+                if s.lat > want:
+                    s.lat = want
+            else:
+                s.lat -= 256
+                if s.lat < want:
+                    s.lat = want
+        else:                                                        # the wheel is centred: the car washes out
+            s.lat += -48 if s.lat > 0 else 48
+            if -48 <= s.lat <= 48:
+                s.lat = 0
+        s.cam += s.lat
         s.seg_pos = (s.seg_pos + s.speed) & 0xFFFF
         if s.seg_pos >= SEG_LENS[s.track]:
             s.seg_pos -= SEG_LENS[s.track]
@@ -222,6 +246,7 @@ rds8 = lambda n: rd8(n) - 256 if rd8(n) > 127 else rd8(n)
 
 def actual():
     return dict(cam=rds("_g_cam"), curve=rds("_g_curve"), speed=rds("_g_speed"), zacc=rd16("_g_zacc"),
+                lat=rds("_g_lat"),
                 steer=rd8("_g_steer"), offroad=rd8("_g_offroad"), invuln=rd8("_g_invuln"), lap=rd8("_g_lap"),
                 tenths=rd16("_g_tenths"), best=rd16("_g_best_tenths"), hits=rd8("_g_hits"),
                 before=rd8("_g_speed_before_hit"), hill=rds8("_g_hill"), pitch=rds8("_g_pitch"), state=rd8("_g_state"), laps_total=rd8("_g_laps_total"),
@@ -333,15 +358,13 @@ def on_update(_):
     a = actual()
     st["calls"] += 1
     # 1. state vs model
-    exp = dict(cam=m.cam, curve=m.curve, speed=m.speed, zacc=m.zacc, steer=m.steer, offroad=m.offroad,
+    exp = dict(cam=m.cam, curve=m.curve, speed=m.speed, zacc=m.zacc, lat=m.lat, steer=m.steer, offroad=m.offroad,
                invuln=m.invuln, lap=m.lap, tenths=m.tenths, best=m.best, hits=m.hits, before=m.before,
                hill=m.hill, pitch=m.pitch, state=m.state, laps_total=m.laps_total, diff=m.diff, cd=m.cd,
                cd_tick=m.cd_tick, fin_tick=m.fin_tick, race_tenths=m.race_tenths, track=m.track, place=a["place"])
     bad = [k for k in exp if exp[k] != a[k]]
     if bad:
         fail("state", f"call {st['calls']} keys={keys:#x} " + ", ".join(f"{k}: rom {a[k]} model {exp[k]}" for k in bad))
-        for k in exp:                                # resync so one divergence is reported once
-            setattr(m, k, a[k])
     if m.race_iter and m.state == RACE:                  # the previous iteration's flow step, now that its g_place is known
         m.place_step(a["place"])
         m.race_iter = False

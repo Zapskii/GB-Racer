@@ -3,12 +3,13 @@
 Corner warning check (prof_race.gb: new physics + warning, track poked per run).
 
 An independent Python model of the warning logic is run beside the ROM, frame by frame, and compared:
-  * g_vcurve (the curvature that is drawn) - leads g_curve: the next segment's value once it is within 48 frames of driving, and
-    stays there until you reach it, whatever the speed does (no "unwinding" when you brake)
-  * g_warn / g_warn_hot - chevron count and direction of the next bend if it is >= 40 sharp, "hot" when you are too fast for it
+  * g_vcurve (the curvature that is drawn) - the bend the car feels: the current segment's value, eased in 2 per frame.
+    The picture and the push are the same bend, so the player always sees what the car is doing.
+  * g_warn / g_warn_hot - chevron count and direction of the NEXT segment's bend once it is within 48 frames of driving,
+    and it stays there until you reach it (no "unwinding" when you brake); "hot" when you are too fast for it
   * the sky sign in OAM slots 20..22: y, x (centred on screen x = 80), tile ('<' or '>'), flashing 12 frames on / off while hot
-Then it reports, for every bend on a flat-out lap, how many frames of warning the driver got before the push started, and
-the same for a bot that brakes as soon as the sign flashes (its road must not unwind).
+Then it reports, for every bend on a flat-out lap, how many frames of warning the driver got before the bend was reached, and
+the same for a bot that brakes as soon as the sign flashes (its sign must not change while the bend is in view).
 
   warncheck.py build/prof_race.gb [--break nolead|nohyst|noflash|offcentre|nodir]
 A --break option puts a deliberate fault into the MODEL; the comparison must then FAIL (it proves the check can fail).
@@ -34,6 +35,7 @@ CURVES = table("track_curve")
 SEG = [4000, 4800, 5600]
 SPR_SIGN = int(re.search(r"SPR_SIGN\s+(\d+)", Path("src/sprite_data.h").read_text()).group(1))
 LEAD = 0 if brk == "nolead" else 48
+CURVE_EASE = 2
 s16 = lambda v: ((v + 0x8000) & 0xFFFF) - 0x8000
 A, B, LEFT, RIGHT = 0x10, 0x20, 2, 1
 
@@ -49,14 +51,18 @@ class Model:
             self.peeked = self.pos + speed * LEAD >= SEG[t]
         elif not self.peeked and self.pos + speed * LEAD >= SEG[t]:
             self.peeked = True
-        tg = CURVES[t][(self.seg + 1) % 16 if self.peeked else self.seg]
-        self.v += max(-4, min(4, tg - self.v))
+        # the drawn road is the bend the car feels: the current segment's curvature,
+        # eased in CURVE_EASE per frame (no lead - the SIGN carries the advance warning)
+        tg = CURVES[t][self.seg]
+        self.v += max(-CURVE_EASE, min(CURVE_EASE, tg - self.v))
+        # the sign shows the NEXT segment's bend, once it is LEAD frames away
+        nxt = CURVES[t][(self.seg + 1) % 16 if self.peeked else self.seg]
         self.warn = 0
-        if self.peeked and abs(tg) >= 40:
-            n = 1 if abs(tg) < 55 else (2 if abs(tg) < 75 else 3)
+        if self.peeked and abs(nxt) >= 40:
+            n = 1 if abs(nxt) < 55 else (2 if abs(nxt) < 75 else 3)
             self.hot = int(speed > (72, 62, 52)[n - 1])
-            self.warn = n if (tg > 0 or brk == "nodir") else -n
-        return tg
+            self.warn = n if (nxt > 0 or brk == "nodir") else -n
+        return nxt
 
 def expected_oam(warn, hot, tenths):
     n = abs(warn)
@@ -77,7 +83,7 @@ def drive(track, kind, frames):
     rd16 = lambda n: mem[syms[n]] | (mem[syms[n] + 1] << 8)
     M = Model(track)
     R = dict(n=0, bad_v=0, bad_w=0, bad_oam=0, first_bad="", signs=0, advance=[], unwind=0, braked=0, maxv=0)
-    st = dict(hits=0, calls=0, prev_peek=False, peek_start=None, prev_seg=0, brake_hold=0, last_dist=None, seen_corner=set())
+    st = dict(hits=0, calls=0, prev_peek=False, peek_start=None, prev_seg=0, brake_hold=0, last_warn=None, seen_corner=set())
     def on_update(_):
         if st["calls"] == 0:
             mem[syms["_g_track"]] = track
@@ -112,12 +118,11 @@ def drive(track, kind, frames):
                     st["seen_corner"].add((track, M.seg)); R["advance"].append((M.seg, nxt, n - st["peek_start"], speed))
                 st["peek_start"] = None
             st["prev_peek"] = M.peeked; st["prev_seg"] = M.seg
-            if M.peeked:                            # the picture must only move towards the target, never back
-                d = abs(tg - v)
-                if st["last_dist"] is not None and d > st["last_dist"]: R["unwind"] += 1
-                st["last_dist"] = d
+            if M.peeked:                            # the sign must not change while the bend is in view
+                if st["last_warn"] is not None and w != st["last_warn"]: R["unwind"] += 1
+                st["last_warn"] = w
             else:
-                st["last_dist"] = None
+                st["last_warn"] = None
         k = A
         if kind == "brake" and M.warn and M.hot:     # lifts as soon as the sign flashes, back on the gas once it stops
             k = B; R["braked"] += 1
