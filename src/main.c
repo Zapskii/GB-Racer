@@ -20,17 +20,11 @@
 #include "layout.h"
 #include "sprites.h"
 #include "game.h"
+#include "boot.h"
 #include "hud.h"
 #include "audio.h"
 #include "flow.h"
 
-/* BGP shade maps: bits 1-0 = colour 0 ... bits 7-6 = colour 3
- * colours: 0 grass, 1 road, 2 rumble, 3 centre line
- * (the stripe rows in ROM are generated from these values by tools/gen_road.py) */
-#define BGP_BASE      0xE4             /* identity: sky white, hills dark, HUD black */
-#define BGP_A         0x09             /* grass light, road dark, rumble white, line white */
-#define BGP_B         0xB8             /* grass white, road dark, rumble black, line = road */
-#define BGP_FOG       0x99             /* flat mid-tone for the distant lines */
 
 /* ------------------------------------------------------- timer gating -----
  * The road ISR runs from IE.LCD-STAT, which we switch on/off from the timer
@@ -47,8 +41,8 @@
 /* ---------------------------------------------------------------- tables -
  * Two page-aligned buffers (SCX page, BGP page right after it), 256 bytes
  * each, indexed by LY.  Fixed addresses so the ISR can use H as the page.   */
-static uint8_t * const tbl_scx[2] = { (uint8_t *)0xD000, (uint8_t *)0xD200 };
-static uint8_t * const tbl_bgp[2] = { (uint8_t *)0xD100, (uint8_t *)0xD300 };
+static uint8_t * const tbl_scx[2] = { TBL_SCX0, TBL_SCX1 };
+static uint8_t * const tbl_bgp[2] = { TBL_BGP0, TBL_BGP1 };
 static const uint8_t   tbl_page_of[2] = { 0xD0, 0xD2 };
 
 extern volatile uint8_t tbl_page;          /* HRAM, defined in raster.s, read by the ISR: SCX table page */
@@ -240,23 +234,12 @@ static void selftest(void)
 /* ------------------------------------------------------------------ main */
 void main(void)
 {
-    uint8_t  b, keys, prev = 0, pressed, back = 1;
+    uint8_t  keys, prev = 0, pressed, back = 1;
 #ifdef PROFILE
     uint8_t  t_loop, t0, t1, t2, d;
 #endif
 
-    DISPLAY_OFF;
-    LCDC_REG = 0x01;                       /* BG on, tiles @ $8800 (signed), map @ $9800, LCD still off */
-
-    memcpy((void *)0x9000, road_tile_data, ROAD_TILE_COUNT * 16);   /* BG ids   0..127 */
-    memcpy((void *)0x8800, sky_tile_data,  SKY_TILE_COUNT  * 16);   /* BG ids 128..255 */
-    memcpy((void *)0x9800, bg_map, BG_MAP_W * BG_MAP_H);
-
-    for (b = 0; b < 2; b++) {              /* every non-road line gets the base values */
-        memset(tbl_scx[b], SCX_BASE, 256);
-        memset(tbl_bgp[b], BGP_BASE, 256);
-        memset(tbl_bgp[b] + IDX0, BGP_FOG, FOG_LINES);   /* fog never changes: fill once */
-    }
+    boot_video();                          /* SGB border, road/sky tiles, map, road tables (src/boot.c, bank 1); LCD left off */
 #if defined(USE_C_BUILDER) || defined(SELFTEST)
     init_zlut();
 #endif
