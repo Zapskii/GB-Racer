@@ -25,7 +25,7 @@ jobs:
           tar -xzf /tmp/gbdk.tar.gz -C vendor
 
       - name: Install PyBoy
-        run: pip install pyboy pillow
+        run: pip install pyboy==2.8.1 pillow
 
       - name: Build and run the full suite
         run: make test
