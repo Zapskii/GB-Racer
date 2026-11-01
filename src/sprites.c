@@ -109,7 +109,11 @@ uint8_t sprites_place(void) { return 1; }     /* traffic mode has no race */
 #define CRUISE_MAX      84                      /* catch-up may exceed the player's top speed (80) */
 
 static int8_t         tlane[N_RACERS];          /* lane the rival is heading for */
+#ifdef PROFILE
+uint8_t               cruise[N_RACERS];         /* not static: tools/racecheck.py reads the AI's own pace */
+#else
 static uint8_t        cruise[N_RACERS];         /* its speed target before rubber banding */
+#endif
 static uint8_t        ai_t[N_RACERS];           /* frames until it picks a new lane / pace */
 static const int8_t   track_pace[3] = { -3, -16, -24 };      /* the rivals do not slow for bends, so their pace is set per track from what a player can average on it ... */
 static const uint8_t  track_cap[3]  = { 76, 60, 52 };          /* ... (the best possible: OVAL ~76, CANYON ~60, ALPINE ~52).  Lap 1 they are ~15% slower than that, +4 per lap, so by lap 3 they drive as well as the track allows */

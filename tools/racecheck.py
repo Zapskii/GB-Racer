@@ -39,7 +39,7 @@ def run_bot(kind, frames, level=1, rom=rom):
     mem = pb.memory
     rd8 = lambda n: mem[syms[n]]
     rd16 = lambda n: mem[syms[n]] | (mem[syms[n] + 1] << 8)
-    D = dict(traffic_seen=0, traffic_frames=0, traffic_spawn=0, traffic_spd=[], calls=0, fail=[], places=[], pops=0, pop_in_lane=0, hits=0, close=0, spd_by_diff={}, rows=0,
+    D = dict(traffic_seen=0, traffic_frames=0, traffic_spawn=0, traffic_spd=[], calls=0, fail=[], places=[], pops=0, pop_in_lane=0, hits=0, close=0, spd_by_diff={}, cruise_by_diff={}, rows=0,
              vis_frames=0, lap=1, prev=None, prev_hits=0, bumps=0, bump_ok=0, big_jumps=0, thru=0)
     def rivals():
         out = []
@@ -115,6 +115,8 @@ def run_bot(kind, frames, level=1, rom=rom):
         if dmin < 300 * 16:
             D["close"] += 1
         d = rd8("_g_diff")
+        if D["calls"] > 400:                              # the AI's chosen pace, wherever it is on the track
+            D["cruise_by_diff"].setdefault(d, []).extend(mem[syms["_cruise"] + i] for i in range(2))
         if rd8("_g_speed") > 0 and D["calls"] > 400:
             for r in rv:
                 if -1600 <= r["z"] <= 4800:               # not rubber banding: its own pace
@@ -210,13 +212,15 @@ lvl = {}
 for L in (0, 2):
     D = run_bot("slow", 4000, level=L)
     ok &= not D["fail"]
-    v = [x for d, vv in D["spd_by_diff"].items() if d <= 1 for x in vv]
+    v = [x for d, vv in D["cruise_by_diff"].items() if d <= 1 for x in vv]
     lvl[L] = sum(v) / len(v)
     results["lvl%d" % L] = D
-d1 = [x for d, vv in s["spd_by_diff"].items() if d <= 1 for x in vv]
+d1 = [x for d, vv in s["cruise_by_diff"].items() if d <= 1 for x in vv]
 lvl[1] = sum(d1) / len(d1)
-print("mean rival pace on laps 1-2 by level EASY/NORMAL/HARD:", {k: round(lvl[k], 1) for k in (0, 1, 2)})
-ok &= lvl[0] + 2 < lvl[1] and lvl[1] + 4 < lvl[2]      # EASY/NORMAL margin 2: the softer corners let the bot run nearer the rivals' rubber band
+print("mean rival cruise target on laps 1-2 by level EASY/NORMAL/HARD:", {k: round(lvl[k], 1) for k in (0, 1, 2)})
+# The level moves the AI's own target by 6 (sprites.c: (g_level - 1) * 6, capped per track).  This reads the
+# target itself, not rival speeds sampled near the bot: those depend on where the bot drives and what it bumps.
+ok &= lvl[0] + 4 < lvl[1] and lvl[1] + 4 < lvl[2]
 # DODGE: staged encounters.  Whenever racer 0 is 784..2600 units' worth of depth ahead of the player and the traffic car is
 # not on screen, put the traffic car 1000 z16 (62 units) in front of it, in the same lane, and watch the crossing:
 # a racer that dodges leaves >= 14 lane units between the two cars when it passes; one that does not drives through.

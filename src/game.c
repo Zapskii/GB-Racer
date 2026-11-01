@@ -39,8 +39,10 @@ static const int8_t track_curve[N_TRACKS][SEG_COUNT] = {
     {   0,  30,   0, -65, -25,   0,  70,   0,       /* CANYON: a mix of bends, three of them tight */
       -90,  20,   0, -35,  75,   0, -20,   0 },
 #endif
-    {   0,  55, -70,  50, -85,   0,  80, -60,       /* ALPINE: back-to-back hairpins */
-       70, -55,   0, -90,  75, -70,  45,   0 }
+    {   0,  45, -60,  40, -70,   0,  65, -50,       /* ALPINE: back-to-back bends, left-right-left.  Still the hardest  */
+       60, -45,   0, -75,  60, -60,  40,   0 }      /* track, but a sixth gentler than v1.1's 55..90 hairpins: with a  */
+                                                    /* person's reaction time the car left the road on nearly every    */
+                                                    /* one of those (tools/humancheck.py)                              */
 };
 
 #ifdef HILLS_OFF
@@ -67,8 +69,14 @@ static const uint16_t seg_len[N_TRACKS] = { 4000, 4800, 5600 };      /* 1/16 dep
 #define SEG_LEN(t) seg_len[t]
 #endif
 
-/* speed^3 >> 11 for speed 0..80 */
-static const uint8_t cube_q[81] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11, 13, 14, 16, 17, 19, 20, 22, 24, 26, 28, 31, 33, 36, 38, 41, 44, 47, 50, 54, 57, 61, 64, 68, 72, 76, 81, 85, 90, 95, 100, 105, 110, 116, 122, 128, 134, 140, 146, 153, 160, 167, 174, 182, 189, 197, 205, 214, 222, 231, 240, 250 };
+/* Look-ahead: where the next segment starts on screen.  Line y (0 = horizon, 79 = car) is
+   4096/(y+4) units from the eye (1/16 depth units: the stripes' units) and the car 4096/83.
+   split_edge[k] is the distance ahead of the car of chunk k's lower edge (chunk k = lines
+   79-8k .. 72-8k).  The chunk holding the join is drawn with a blend of the two bends, in
+   proportion to how far the join has come through it, so the far road sweeps smoothly
+   instead of jumping a chunk at a time (up to ~20 px in one frame at an S-bend). */
+static const uint16_t split_edge[SPLIT_CHUNKS] = { 0, 5, 11, 19, 30, 45, 66, 100, 161, 307 };
+static const uint16_t split_rcp[SPLIT_CHUNKS]  = { 3277, 2731, 2048, 1489, 1092, 780, 482, 269, 112, 20 };   /* 64*256 / chunk depth: no divide */
 
 const uint8_t lap_options[N_LAP_OPTIONS] = { 3, 5, 10 };
 uint8_t  g_place, g_state, g_laps_sel, g_laps_total, g_diff, g_cd, g_cd_tick, g_fin_tick, g_new_record;
@@ -77,7 +85,10 @@ uint8_t  g_level = 1, g_paused;
 int16_t  g_hit_dx;
 uint8_t  g_track;
 int8_t   g_hill, g_pitch;
-int16_t  g_cam, g_curve, g_vcurve, g_speed;
+int16_t  g_cam, g_curve, g_speed;
+int8_t   g_vcurve;
+int8_t   g_vcurve2, g_vmid, g_vnear;
+uint8_t  g_split = SPLIT_CHUNKS;
 int8_t   g_warn;
 uint8_t  g_warn_hot;
 uint16_t g_zacc;
@@ -92,7 +103,8 @@ static int16_t  hill_pull;                /* the slope's pull on the speed, Q8 (
 
 static void reset_race_vars(void)
 {
-    g_cam = g_curve = g_vcurve = g_speed = 0;
+    g_cam = g_curve = g_vcurve = g_vcurve2 = g_speed = 0;
+    g_split = SPLIT_CHUNKS;
     g_lat = 0;
     hill_pull = 0;
     g_warn = g_warn_hot = peeked = steer_hold = steer_extra = steer_dir = steer_grace = 0;
@@ -173,6 +185,24 @@ static void lap_done(void)
     f6 = 0;
 }
 
+#ifndef LEGACY_PHYSICS
+/* The bend's sideways push on the car at a speed, 1/256 px per frame (sign: right-hand bend pushes left).
+   One function for the car and for the warning sign, so the sign cannot promise a speed the car can't hold. */
+static int16_t bend_push(int16_t curve, uint8_t sp)
+{
+    int16_t push;
+    uint8_t q = (uint8_t)(((uint16_t)sp * sp) >> 5);   /* speed^2/32, <= 200 */
+    q = (uint8_t)(((uint16_t)q * sp) >> 6);            /* speed^3/2048, <= 250 */
+    q -= q >> 3;                                        /* toned down by an eighth */
+    push = (curve * q) >> 3;
+    push += (push * g_diff) >> 3;                       /* later laps push harder: x1.5 by lap 5 */
+    push += (push * ((int8_t)g_level - 1)) >> 2;        /* EASY 0.75x, NORMAL 1x, HARD 1.25x */
+    if (push >  PUSH_MAX) push =  PUSH_MAX;             /* a hairpin taken far too fast slides the car out over a second */
+    if (push < -PUSH_MAX) push = -PUSH_MAX;
+    return push;
+}
+#endif
+
 static int16_t ease(int16_t v, int16_t t, int16_t d)   /* one frame of easing towards a curvature target, d per frame */
 {
     if (v < t)      { v += d; if (v > t) v = t; }
@@ -190,6 +220,13 @@ void game_update(uint8_t keys)
 {
     int16_t cap = g_offroad ? SPEED_OFFROAD : SPEED_MAX;
     int16_t st, target, off, push;
+    uint16_t seg_len_now;                       /* SEG_LEN(g_track), looked up once */
+#ifndef LEGACY_PHYSICS
+    int16_t  st_hold;
+#endif
+#ifndef LEGACY_PHYSICS
+    const int8_t *tc;
+#endif
 
     /* ---- speed ---- */
     if (keys & (J_B | J_DOWN)) {                /* the brake wins: you can slow for a bend without releasing the gas */
@@ -217,6 +254,9 @@ void game_update(uint8_t keys)
 
     /* ---- steering: weak when slow ---- */
     st = STEER_BASE + g_speed * STEER_GAIN;
+#ifndef LEGACY_PHYSICS
+    st_hold = st + (st >> 1);                   /* full lock with the ramp built up: what the warning sign measures against */
+#endif
 #ifndef LEGACY_PHYSICS
     /* the longer you hold a direction the harder the car turns in: +1/64 per frame held, up to +STEER_RAMP/64 (50%) after half a second */
     {
@@ -269,8 +309,9 @@ void game_update(uint8_t keys)
 
     /* ---- track position and curvature ---- */
     seg_pos += (uint16_t)g_speed;
-    if (seg_pos >= SEG_LEN(g_track)) {
-        seg_pos -= SEG_LEN(g_track);
+    seg_len_now = SEG_LEN(g_track);
+    if (seg_pos >= seg_len_now) {
+        seg_pos -= seg_len_now;
         peeked = 0;
         if (++seg == SEG_COUNT) {
             seg = 0;
@@ -280,33 +321,53 @@ void game_update(uint8_t keys)
     }
 #ifdef LEGACY_PHYSICS
     g_curve = ease(g_curve, track_curve[g_track][seg], 2);
-    g_vcurve = g_curve;
+    g_vcurve = g_vcurve2 = g_vmid = g_vnear = g_curve;   /* one bend for the whole road: no look-ahead */
 #else
-    /* One curvature for the road and for the car.  The picture and the push must agree:
-       if the drawn road bends one way and the push acts the other way, the car is thrown
-       off the outside of the bend the player is looking at, and a "sharp left then sharp
-       right" corner is felt as a straight run off the road.  Pole Position (1982) works
-       the same way: the curve is sampled at the car's own position and the visual road
-       uses the same data, so the picture and the physics are in phase.  The road's shape
-       eases in over ~45 frames (CURVE_EASE per frame), so the bend is seen before it is
-       fully felt.
+    /* The road is drawn as two bends: the current segment's from the car up to the line
+       where the next segment starts, and the next segment's beyond it (g_split chunks of
+       8 lines use g_vcurve, the rest g_vcurve2).  As the car drives on, that line comes
+       down the screen at the stripes' speed, so a bend is SEEN on the horizon and arrives
+       at the car; the push starts when it gets there.  Pole Position (1982) and every
+       segment-based road since work the same way.  Before this the whole road was one
+       curvature: a bend curled the road under the car all at once, with no warning, and
+       the car seemed to be pushed off a road that bent around it.
 
-       Advance warning lives in the SIGN, not in the road's shape: the sky sign shows the
-       next segment's bend once it is LEAD_FRAMES frames of driving away, and keeps
-       showing it (braking does not make the bend "unwind").  It flashes while you are
-       faster than the bend allows (g_warn: +- 1..3 chevrons, 0 none). */
-    if (!peeked && seg_pos + (uint16_t)((g_speed << 5) + (g_speed << 4)) >= SEG_LEN(g_track))
+       The car feels the segment it is in (g_curve), eased in over ~11 frames (CURVE_EASE) so
+       the push does not jolt; the picture at the car is the same segment's bend (g_vcurve).
+
+       The sky sign still warns of the next bend LEAD_FRAMES frames ahead and flashes
+       while you are faster than the bend allows (g_warn: +- 1..3 chevrons, 0 none). */
+    if (!peeked && seg_pos + (uint16_t)((g_speed << 5) + (g_speed << 4)) >= seg_len_now)
         peeked = 1;
-    target = track_curve[g_track][peeked ? (seg + 1) & (SEG_COUNT - 1) : seg];
+    tc = track_curve[g_track];
+    g_vcurve  = tc[seg];
+    g_vcurve2 = tc[(seg + 1) & (SEG_COUNT - 1)];
+    target = peeked ? g_vcurve2 : g_vcurve;
     g_warn = 0;
     if (peeked && (target >= WARN_MIN || target <= -WARN_MIN)) {
         uint8_t m = (uint8_t)(target < 0 ? -target : target);
         uint8_t n = m < 55 ? 1 : (m < 75 ? 2 : 3);
-        g_warn_hot = g_speed > (n == 1 ? 72 : (n == 2 ? 62 : 52));
+        {   /* too fast = the bend would push harder than the steering can hold at full lock (+50%), on this lap and
+               level.  (v1.1 used fixed speeds, 52/62/72, which ignored the lap and level: by lap 5 the sign said a
+               hairpin was fine at 52 when it threw the car off above ~45.) */
+            int16_t p = bend_push(target, (uint8_t)g_speed);
+            g_warn_hot = (p < 0 ? -p : p) > st_hold;
+        }
         g_warn = target < 0 ? -(int8_t)n : (int8_t)n;
     }
-    g_curve = ease(g_curve, track_curve[g_track][seg], CURVE_EASE);
-    g_vcurve = g_curve;                        /* the picture and the push are the same bend */
+    g_curve = ease(g_curve, g_vcurve, CURVE_EASE);
+    {
+        uint16_t left = (seg_len_now - seg_pos) >> 4;            /* distance to the next segment, <= 350 */
+        uint8_t  n = 0;
+        int8_t   b;
+        while (n < SPLIT_CHUNKS - 1 && left > split_edge[n + 1]) n++;
+        left = ((left - split_edge[n]) * split_rcp[n]) >> 8;      /* 0..64: how much of chunk n is still this segment */
+        if (left > 64) left = 64;
+        b = g_vcurve2 + (int8_t)(((int16_t)(g_vcurve - g_vcurve2) * (uint8_t)left) >> 6);   /* chunk n's blend */
+        g_vnear = g_vcurve; g_vmid = b;
+        if (!n) { g_vnear = b; g_vmid = g_vcurve2; n = 1; }      /* the join is in the car's own chunk: blend that one */
+        g_split = n;
+    }
 #endif
 
     /* ---- hill pitch: ease towards the segment's value, one step per frame ---- */
@@ -319,17 +380,12 @@ void game_update(uint8_t keys)
     push = (g_curve * g_speed) >> 5;
     push += (push * g_diff) >> 2;                /* harder laps: the bends push up to twice as hard */
 #else
-    /* centrifugal: grows with the CUBE of the speed (push = curve * speed^3 / 16384, from a table), so a tight bend cannot be held
-       flat out.  The steering answers 160 + 4*speed (480 at 80).  A curve of 90 pushes 2,800 at speed 80, six times that: off the road in
-       a few frames; the best line rides the road's width and slows to ~50 there, ~60 for a 70, ~70 for a 50.  30 and below can be taken
-       flat out.  Later laps push harder (x1.5 by lap 5).  The level scales it too: EASY 0.75x, NORMAL 1x, HARD 1.25x.  The table is
-       indexed by the grass cap off road, so the push vanishes once that cap applies. */
-    push = (g_curve * cube_q[g_speed > cap ? (uint8_t)cap : (uint8_t)g_speed]) >> 3;
-    push -= push >> 3;                           /* toned down by an eighth: bends were too violent, but held steering now turns harder (STEER_RAMP) */
-    push += (push * g_diff) >> 3;
-    push += (push * ((int8_t)g_level - 1)) >> 2;
-    if (push >  PUSH_MAX) push =  PUSH_MAX;      /* a hairpin taken far too fast used to fling the car ~10 px a frame: now it slides out over a second */
-    if (push < -PUSH_MAX) push = -PUSH_MAX;
+    /* centrifugal: grows with the CUBE of the speed (push = curve * speed^3 / 16384 * 7/8), so a tight bend cannot be held flat
+       out, but braking for it pays back quickly.  (A square law was tried with the look-ahead: matched at speed 64 it pushes ~60%
+       harder at 40, the speed you brake down to, which is the opposite of the fix.)  The steering answers 160 + 4*speed (480 at 80);
+       a curve of 90 pushes ~2,400 at 80, off the road in a few frames.  Later laps push harder (x1.5 by lap 5).  The level scales it
+       too: EASY 0.75x, NORMAL 1x, HARD 1.25x.  The speed is clamped to the grass cap off road, so the push all but vanishes there. */
+    push = bend_push(g_curve, g_speed > cap ? (uint8_t)cap : (uint8_t)g_speed);
 #endif
     g_cam -= push;
     clamp_cam();

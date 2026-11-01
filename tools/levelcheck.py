@@ -44,7 +44,7 @@ def run(level):
             mem[syms["_g_level"]] = level
             wr16("_g_cam", 0)
             wr16("_g_curve", 30)
-            wr16("_g_vcurve", 30)
+            mem[syms["_g_vcurve"]] = 30                 # int8
             wr16("_g_speed", 60)
             S["phase"] = "measure"
         elif S["phase"] == "measure":

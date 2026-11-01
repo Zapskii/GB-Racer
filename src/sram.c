@@ -11,6 +11,7 @@
  * A bad magic, version, checksum or selection (a fresh cartridge, or RAM that lost its battery)
  * just means "no records": everything is cleared and the next save writes a valid block.
  */
+#pragma bank 1                                  /* called rarely, with the road ISR off: bank 0 is full */
 #include <gb/gb.h>
 #include "game.h"
 
@@ -34,7 +35,7 @@ static void clear_records(void)
         p[i] = 0;
 }
 
-void sram_load(void)
+void sram_load(void) BANKED
 {
     uint8_t i, ok;
     uint16_t *p = &g_best_total[0][0][0];
@@ -54,7 +55,7 @@ void sram_load(void)
     *(volatile uint8_t *)0x0000 = 0x00;                 /* RAM disable: protects the save from a crash or power-off */
 }
 
-void sram_save(void)
+void sram_save(void) BANKED
 {
     uint8_t i;
     uint16_t *p = &g_best_total[0][0][0];

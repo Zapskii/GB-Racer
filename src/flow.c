@@ -102,8 +102,8 @@ void flow_after_update(void)
             audio_sfx(SFX_FINISH);
         }
         if (++g_fin_tick >= FINISH_COAST) {
+            road_enable(0);                         /* first: the save is banked, and the ISR reads the mapped bank */
             game_finish_record();
-            road_enable(0);
             SWITCH_ROM_MBC1(1);     /* hud_results lives in bank 1 */
             hud_results();
             HIDE_SPRITES;

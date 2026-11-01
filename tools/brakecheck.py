@@ -39,7 +39,7 @@ S = {"phase": "accel", "n": 0, "v0": None, "v1": None}
 def on_update(_):
     wr16("_g_cam", 0)
     wr16("_g_curve", 0)
-    wr16("_g_vcurve", 0)
+    mem[syms["_g_vcurve"]] = 0                 # int8
     mem[syms["_g_offroad"]] = 0
     S["n"] += 1
     if S["phase"] == "accel":

@@ -1,6 +1,7 @@
 #ifndef GAME_H
 #define GAME_H
 #include <stdint.h>
+#include <gb/gb.h>                 /* BANKED */
 
 #define SPEED_MAX      80          /* 1/16 depth-units per frame (the stripe scroll speed) */
 #define OFFROAD_PX     58          /* |road centre offset at the bottom line| beyond this = on the grass */
@@ -19,7 +20,12 @@
 #define GRASS_DRAG     8           /* speed lost per frame while over the grass cap */
 #endif
 #define LEAD_FRAMES    48          /* the warning sign appears this many frames of driving before the bend (not in LEGACY_PHYSICS builds); game.c hard-codes 48 = 32 + 16 */
+#ifdef LEGACY_PHYSICS
 #define CURVE_EASE     2           /* the road's curvature eases this far per frame: a bend is felt over ~45 frames */
+#elif !defined(CURVE_EASE)
+#define CURVE_EASE     8           /* the bend the car FEELS eases in over ~11 frames (a 90) once the drawn bend reaches it (the picture steps, see g_split) */
+#endif
+#define SPLIT_CHUNKS   10          /* the road is drawn in 10 chunks of 8 lines, bottom to horizon */
 #define PUSH_MAX       1600        /* the most a bend can push the car sideways in one frame, 1/256 px (about 6 px; uncapped a hairpin at full speed pushed 10 px a frame) */
 #define STEER_RAMP     32          /* frames of held steering that add (frames/64) to the turn rate: up to +50% */
 #define STEER_GRACE    6           /* frames a release keeps the ramp: a short neutral gap does not reset the turn rate */
@@ -47,7 +53,11 @@ extern const uint8_t lap_options[N_LAP_OPTIONS];   /* 3, 5, 10 */
 /* All plain globals so the emulator tests can read them by symbol. */
 extern int16_t  g_cam;             /* road offset at the bottom line, 1/256 px (right = positive) */
 extern int16_t  g_curve;           /* current road curvature (eased towards the segment's value)   */
-extern int16_t  g_vcurve;          /* the curvature that is DRAWN: the same bend the car feels (g_curve) */
+extern int8_t   g_vcurve;          /* the current segment's curvature: drawn from the car up to where the next one starts */
+extern int8_t   g_vcurve2;         /* the next segment's curvature, drawn beyond that line            */
+extern uint8_t  g_split;           /* chunks (of 8 lines, from the bottom) drawn with g_vnear, 1..9 (10 = one bend) */
+extern int8_t   g_vnear;           /* the curvature drawn for those chunks: g_vcurve, blended in the car's own chunk */
+extern int8_t   g_vmid;            /* chunk g_split's curvature: the two bends blended by how much of it is still this segment */
 extern int8_t   g_warn;            /* upcoming sharp bend: sign = direction (+ right), magnitude 1..3 = chevrons, 0 = none */
 extern uint8_t  g_warn_hot;        /* ... and you are too fast for it: the sign flashes */
 extern int16_t  g_speed;
@@ -87,7 +97,9 @@ void game_hit(void);               /* sprites_update reported a collision with a
 
 
 /* battery-backed records (src/sram.c): magic + version + checksum, anything else resets to "no records" */
-void sram_load(void);              /* fills g_best_total and the title selections from cartridge RAM, or clears them */
-void sram_save(void);
+/* sram.c lives in ROM bank 1 (bank 0 is full); BANKED calls switch to it and back.  Call them
+   only with the road ISR off: it reads stripe rows from whatever bank is mapped. */
+void sram_load(void) BANKED;              /* fills g_best_total and the title selections from cartridge RAM, or clears them */
+void sram_save(void) BANKED;
 
 #endif

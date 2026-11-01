@@ -33,13 +33,23 @@ counter-steers into a slide rather than snapping to the road. Holding a directio
 makes the car turn harder the longer you hold it. Coasting slows you more the faster
 you go, and a climb bleeds speed off while a descent gives it back.
 
-The road you see and the road the car feels are the same bend, eased in over about
-three quarters of a second.  They used to differ: the picture led the physics by the
-next segment's curvature, so at a sharp change of direction the car was being thrown
-off the outside of the bend it was really in while the player was steering into the
-bend they could see.  `tools/phasecheck.py` now guards that they stay in phase; the
-advance warning lives in the sky sign instead, which shows the next bend before you
-reach it.
+You see a bend coming before you reach it.  The road is drawn as two bends: the one the car
+is in, from the car up to where the next section starts, and the next one beyond that.  That
+join comes down the screen at the road's own speed, so a bend appears on the horizon and
+arrives at the car, and the car feels it from the moment it gets there (eased in over about
+11 frames).  The road is drawn in blocks of 8 lines, and the block the join is passing
+through is a blend of the two bends, so the far road sweeps round smoothly instead of
+jumping a block at a time.  Before this, the whole road used one curve: a bend curled the road under the car
+all at once, with no warning, and the car seemed to be pushed off a road that bent around it.
+`tools/phasecheck.py` checks that a bend is never felt before it reaches the car on screen and
+that the picture and the push agree.
+
+The sky sign warns of a sharp bend ahead and flashes when you are too fast for it: when its
+push, on this lap and level, would beat the steering at full lock.  (v1.1 flashed above fixed
+speeds that ignored the lap and level, so by lap 5 it called a hairpin safe at a speed that
+threw the car off.)  ALPINE's bends are a sixth gentler than in v1.1, where a driver with a
+person's reaction time left the road on nearly every one; it is still the hardest track, and
+flat out still loses clearly to braking there.
 
 ## Building
 
@@ -73,13 +83,19 @@ If the venv lives elsewhere: `make check PYTHON=/path/to/python`.
 The regression checks added by the upgrade are `tools/brakecheck.py` (A+B must slow the car),
 `tools/levelcheck.py` (EASY/NORMAL/HARD scale the push), `tools/offroadcheck.py` (the push is
 gone once the grass cap applies), `tools/steercheck.py` (the steering ramp survives a short
-release), `tools/phasecheck.py` (the road the player sees and the road the car feels are
-the same bend), `tools/flickercheck.py` (a rival hidden by the OAM multiplexer must not collide),
+release), `tools/phasecheck.py` (a bend reaches the car on screen before the car feels it, and
+the picture and the push agree), `tools/flickercheck.py` (a rival hidden by the OAM multiplexer must not collide),
 `tools/audiostatecheck.py` (title/pause must pass `g_hits`, not 0, to `audio_update`) and
 `tools/pausecheck.py` (pause menu, sound mute, restart and quit).  The older tools each cover
 one subsystem; many support `--break <name>` to prove the check can fail on a deliberately
 wrong model.  `audiocheck` measures engine steps 1-7; step 0's expected subharmonic is below
 the ACF band and is covered by the standstill check.
+
+`tools/humancheck.py build/prof_race.gb [delay ...]` is a report, not a pass/fail check: a bot
+that drives like a person (from the car's position and drift on screen, with a reaction delay,
+braking when the sign flashes) and prints, per track, the share of time on the grass, the mean
+speed, how often the car left the road and for how long.  Use it to judge a handling or track
+change on how it treats a player.
 
 ## Layout
 
@@ -109,7 +125,7 @@ bench/          cycle benchmark (development artifact; see bench/Makefile)
 
 ### Memory map
 
-- Bank 0: code and runtime data.  Must end below `$4000` (`tools/romcheck.py`), with at least
+- Bank 0: code and runtime data (`src/sram.c` is in bank 1 via `BANKED` calls, made only with the road ISR off).  Must end below `$4000` (`tools/romcheck.py`), with at least
   64 bytes headroom; the current build has 163 bytes free.
 - Bank 1: boot-time data (road/sprite/font), the full-screen menu code (`src/menus.c`) and the
   CANYON palette rows at `$6000`.

@@ -55,6 +55,7 @@ check: all variants
 	$(PYTHON) tools/romcheck.py build/racer.map
 	$(PYTHON) tools/profile.py build/prof_asm.gb
 	$(PYTHON) tools/modelcheck.py build/prof_asm.gb
+	$(PYTHON) tools/modelcheck.py build/prof_race.gb    # the look-ahead build: two bends per frame
 	$(PYTHON) tools/crosscheck.py build/prof_asm.gb build/prof_c.gb
 	$(PYTHON) tools/brakecheck.py build/prof_race.gb
 	$(PYTHON) tools/levelcheck.py build/prof_race.gb

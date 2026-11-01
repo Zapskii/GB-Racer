@@ -3,12 +3,14 @@
 Corner warning check (prof_race.gb: new physics + warning, track poked per run).
 
 An independent Python model of the warning logic is run beside the ROM, frame by frame, and compared:
-  * g_vcurve (the curvature that is drawn) - the bend the car feels: the current segment's value, eased in 2 per frame.
-    The picture and the push are the same bend, so the player always sees what the car is doing.
+  * g_vcurve (the curvature drawn at the car) - the current segment's value, no easing: the road is drawn as two
+    bends and the next one comes down the screen to the car (see phasecheck.py), so the picture steps exactly there.
   * g_warn / g_warn_hot - chevron count and direction of the NEXT segment's bend once it is within 48 frames of driving,
-    and it stays there until you reach it (no "unwinding" when you brake); "hot" when you are too fast for it
+    and it stays there until you reach it (no "unwinding" when you brake); "hot" when you are too fast for it: its push,
+    on this lap and level, beats the steering at full lock
   * the sky sign in OAM slots 20..22: y, x (centred on screen x = 80), tile ('<' or '>'), flashing 12 frames on / off while hot
-Then it reports, for every bend on a flat-out lap, how many frames of warning the driver got before the bend was reached, and
+Then it reports, for every bend on a flat-out lap, how many frames of warning the driver got before the bend was reached (at the speed the
+sign appeared at: speeding up afterwards is the driver's choice), and
 the same for a bot that brakes as soon as the sign flashes (its sign must not change while the bend is in view).
 
   warncheck.py build/prof_race.gb [--break nolead|nohyst|noflash|offcentre|nodir]
@@ -35,14 +37,23 @@ CURVES = table("track_curve")
 SEG = [4000, 4800, 5600]
 SPR_SIGN = int(re.search(r"SPR_SIGN\s+(\d+)", Path("src/sprite_data.h").read_text()).group(1))
 LEAD = 0 if brk == "nolead" else 48
-CURVE_EASE = 2
 s16 = lambda v: ((v + 0x8000) & 0xFFFF) - 0x8000
 A, B, LEFT, RIGHT = 0x10, 0x20, 2, 1
+
+def bend_push(curve, sp, diff, level):
+    """game.c bend_push(): the bend's sideways push at a speed, on this lap (g_diff) and level"""
+    q = ((sp * sp) >> 5) * sp >> 6
+    q -= q >> 3
+    p = (curve * q) >> 3
+    p += (p * diff) >> 3
+    p += (p * (level - 1)) >> 2
+    return max(-1600, min(1600, p))
+
 
 class Model:
     def __init__(self, track):
         self.t = track; self.seg = 0; self.pos = 0; self.peeked = False; self.v = 0; self.warn = 0; self.hot = 0
-    def step(self, speed):
+    def step(self, speed, diff=0, level=1):
         t = self.t
         self.pos += speed
         if self.pos >= SEG[t]:
@@ -51,16 +62,16 @@ class Model:
             self.peeked = self.pos + speed * LEAD >= SEG[t]
         elif not self.peeked and self.pos + speed * LEAD >= SEG[t]:
             self.peeked = True
-        # the drawn road is the bend the car feels: the current segment's curvature,
-        # eased in CURVE_EASE per frame (no lead - the SIGN carries the advance warning)
-        tg = CURVES[t][self.seg]
-        self.v += max(-CURVE_EASE, min(CURVE_EASE, tg - self.v))
+        # the road drawn at the car is the current segment's curvature (the next one is drawn beyond it)
+        self.v = CURVES[t][self.seg]
         # the sign shows the NEXT segment's bend, once it is LEAD frames away
         nxt = CURVES[t][(self.seg + 1) % 16 if self.peeked else self.seg]
         self.warn = 0
         if self.peeked and abs(nxt) >= 40:
             n = 1 if abs(nxt) < 55 else (2 if abs(nxt) < 75 else 3)
-            self.hot = int(speed > (72, 62, 52)[n - 1])
+            hold = 160 + 4 * speed                # full lock with the steering ramp built up
+            hold += hold >> 1
+            self.hot = int(abs(bend_push(nxt, speed, diff, level)) > hold)
             self.warn = n if (nxt > 0 or brk == "nodir") else -n
         return nxt
 
@@ -97,9 +108,9 @@ def drive(track, kind, frames):
         else:
             used = speed
         if n >= 2:                                  # state now = after the previous update, which used this speed
-            tg = M.step(used)
+            tg = M.step(used, rd8("_g_diff"), rd8("_g_level"))
             R["n"] += 1
-            v = s16(rd16("_g_vcurve")); w = rd8("_g_warn"); w = w - 256 if w > 127 else w; hot = rd8("_g_warn_hot")
+            v = (rd8("_g_vcurve") ^ 0x80) - 0x80; w = rd8("_g_warn"); w = w - 256 if w > 127 else w; hot = rd8("_g_warn_hot")
             bad = []
             if v != M.v: R["bad_v"] += 1; bad.append(f"vcurve rom {v} model {M.v}")
             if w != M.warn or (M.warn and hot != M.hot): R["bad_w"] += 1; bad.append(f"warn rom {w}/{hot} model {M.warn}/{M.hot}")
@@ -110,12 +121,16 @@ def drive(track, kind, frames):
                     R["bad_oam"] += 1; bad.append(f"oam rom {oam} model {exp}"); break
             if bad and not R["first_bad"]: R["first_bad"] = f"frame {n} track {track}: " + "; ".join(bad)
             if M.warn: R["signs"] += 1
-            # the lead: frames from the road starting to bend to the push starting (segment change into a bend)
-            if M.peeked and not st["prev_peek"]: st["peek_start"] = n
+            # the lead: from the sign appearing to the push starting (segment change into a bend), in frames of
+            # driving at the speed the sign appeared at -- the distance covered / that speed.  A driver who speeds
+            # up after the sign gets fewer clock frames; that is their choice, not a late sign.
+            if M.peeked and not st["prev_peek"]: st["peek_start"] = (M.seg, M.pos, max(1, used))
             if M.seg != st["prev_seg"]:
                 nxt = CURVES[track][M.seg]
                 if st["peek_start"] is not None and abs(nxt) >= 40 and (track, M.seg) not in st["seen_corner"] and n > 120:
-                    st["seen_corner"].add((track, M.seg)); R["advance"].append((M.seg, nxt, n - st["peek_start"], speed))
+                    s0, p0, v0 = st["peek_start"]
+                    dist = SEG[track] - p0 + M.pos            # from the sign to this frame, across the segment change
+                    st["seen_corner"].add((track, M.seg)); R["advance"].append((M.seg, nxt, dist // v0, v0))
                 st["peek_start"] = None
             st["prev_peek"] = M.peeked; st["prev_seg"] = M.seg
             if M.peeked:                            # the sign must not change while the bend is in view

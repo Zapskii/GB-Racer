@@ -11,6 +11,13 @@ CANYON and ALPINE (slower, and on the grass often), while OVAL stays easy.
 import re, sys
 from pathlib import Path
 from pyboy import PyBoy
+
+
+def cube_q(speed, cap):
+    """the ROM's speed term: speed^2/32, times speed /64, less an eighth (8-bit steps, as game.c)"""
+    s = min(speed, cap)
+    q = ((s * s) >> 5) * s >> 6
+    return q - (q >> 3)
 rom = Path(sys.argv[1])
 syms = {}
 for l in rom.with_suffix(".noi").read_text().splitlines():
@@ -30,7 +37,7 @@ A, LEFT, RIGHT, B = 0x10, 2, 1, 0x20
 LINEAR = "--old" in sys.argv
 
 def push(curve, speed):
-    return (curve * speed) >> 5 if LINEAR else (lambda p: p - (p >> 3))((curve * ((min(speed, 80) ** 3) >> 11)) >> 3)
+    return (curve * speed) >> 5 if LINEAR else (curve * cube_q(speed, 80)) >> 3
 def steer(speed): return (160 + 4 * speed) * 1.4      # held steering ramps up to +50%: a driver in a bend has ~1.4x
 
 def drive(track, kind, laps=3):

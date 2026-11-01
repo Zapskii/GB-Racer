@@ -26,7 +26,10 @@
 ; Parameters are passed in globals (set by build_tables_fast() in main.c):
 ;     bt_s      u16  initial scroll position, 8.8 px: SCX_BASE*256 + cam
 ;     bt_ds     s16  its slope per line, 8.8 px/line  (zero at the horizon)
-;     bt_curve  s16  change of slope per 8-line chunk, 8.8 px/line
+;     bt_curve  s16  change of slope per 8-line chunk, 8.8 px/line (the current bend)
+;     bt_curve2 s16  the curve after bt_split chunks (the blended chunk) ...
+;     bt_curve3 s16  ... and after one more (the next bend)
+;     bt_split  u8   chunks drawn with bt_curve, >= 1 (the car's chunk is always this bend)
 ;     bt_scx    ptr  &scx_table[IDX0 + 79]   (bottom road line; we walk upward)
 ;
 ; One line = 6 cycles.  DE walks the table, HL is the scroll position (its
@@ -44,6 +47,12 @@
 _tbl_page::
         .ds     1
 _bgp_page::
+        .ds     1
+_bt_curve2::                        ; the builder's look-ahead parameters live here so
+        .ds     2                   ; ldh reaches them: one byte shorter per access
+_bt_curve3::
+        .ds     2
+_bt_split::
         .ds     1
 
         .area   _CODE
@@ -120,6 +129,20 @@ _build_tables_asm::
         add     hl,bc
         dec     e
 
+        ldh     a,(_bt_split)       ; after bt_split chunks the curve steps on:
+        dec     a                   ; bt_curve2 (the blended chunk), then bt_curve3
+        jr      nz,2$
+        ldh     a,(_bt_curve2)
+        ld      (_bt_curve),a
+        ldh     a,(_bt_curve2+1)
+        ld      (_bt_curve+1),a
+        ldh     a,(_bt_curve3)
+        ldh     (_bt_curve2),a
+        ldh     a,(_bt_curve3+1)
+        ldh     (_bt_curve2+1),a
+        ld      a,#1                ; one chunk later: the next bend (then repeats it)
+2$:
+        ldh     (_bt_split),a
         ld      a,(_bt_curve)       ; slope += curve   (once per chunk)
         add     a,c
         ld      c,a

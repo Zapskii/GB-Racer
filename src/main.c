@@ -139,11 +139,13 @@ static void build_tables_c(uint8_t buf, int16_t cam, int16_t curve, uint16_t zpo
     int16_t  x   = -cam;
     int16_t  dx  = (int16_t)(((int32_t)cam * 16) / (ROAD_LINES - 1));  /* horizon stays put */
     uint8_t  y   = ROAD_LINES;
+    uint8_t  near = g_split << 3;                 /* lines drawn with the current bend (>= 8); the rest are the next one */
 
     while (y--) {
         scx[y] = (uint8_t)(SCX_BASE - (x >> 8));
         x  += dx >> 4;
         dx += curve;
+        if (!--near) curve = g_vcurve2;
 
         if (y < FOG_LINES)
             bgp[y] = BGP_FOG;
@@ -159,6 +161,8 @@ static void build_tables_c(uint8_t buf, int16_t cam, int16_t curve, uint16_t zpo
  * per frame; the stripe palette is a ROM row picked by the phase.           */
 uint16_t bt_s;
 int16_t  bt_ds, bt_curve;
+extern int16_t bt_curve2, bt_curve3;       /* HRAM, defined in raster.s */
+extern uint8_t  bt_split;
 uint8_t *bt_scx;
 extern void build_tables_asm(void);
 
@@ -168,6 +172,9 @@ static void build_tables_fast(uint8_t buf, int16_t cam, int16_t curve, uint16_t 
     bt_s     = (uint16_t)((int16_t)(SCX_BASE * 256) + cam);
     bt_ds    = -(int16_t)(((cam >> 4) * 13) >> 6);          /* -cam/79, no divide */
     bt_curve = -(curve >> 1);                               /* per 8 lines, 8.8 px/line */
+    bt_curve2 = -(g_vmid >> 1);                             /* this bend for g_split chunks, one blended chunk, */
+    bt_curve3 = -(g_vcurve2 >> 1);                          /* then the next bend                              */
+    bt_split  = g_split;                                    /* >= 1: the car's own chunk is always this bend    */
     bt_ds   += (bt_curve * 7) >> 4;                         /* sample mid-chunk, not chunk start */
     bt_scx   = tbl_scx[buf] + IDX0 + ROAD_LINES - 1;
     build_tables_asm();
@@ -211,6 +218,7 @@ static void selftest(void)
     uint8_t c, y;
     int8_t  d;
 
+    g_split = SPLIT_CHUNKS;                 /* one bend for the whole road: compares the builders, not the look-ahead */
     for (c = 0; c < 3; c++) {
         build_tables_c   (0, cams[c], curves[c], zps[c]);
         build_tables_fast(1, cams[c], curves[c] + SELFTEST_PERTURB, zps[c]);
@@ -300,7 +308,7 @@ void main(void)
 #ifdef PROFILE
         t0 = LY_REG;
 #endif
-        build_tables(back, g_cam, g_vcurve, g_zacc >> 4);
+        build_tables(back, g_cam, g_vnear, g_zacc >> 4);
 #ifdef PROFILE
         t1 = LY_REG;
         d = ly_delta(t0, t1);

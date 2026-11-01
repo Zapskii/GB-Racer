@@ -28,6 +28,13 @@ import sys
 from pathlib import Path
 from pyboy import PyBoy
 
+
+def cube_q(speed, cap):
+    """the ROM's speed term: speed^2/32, times speed /64, less an eighth (8-bit steps, as game.c)"""
+    s = min(speed, cap)
+    q = ((s * s) >> 5) * s >> 6
+    return q - (q >> 3)
+
 rom = Path(sys.argv[1])
 brk = sys.argv[sys.argv.index("--break") + 1] if "--break" in sys.argv else None
 syms = {}
@@ -45,7 +52,7 @@ TRACK_NAMES = ["OVAL", "CANYON", "ALPINE"]
 TRACKS = [
     [0, 20, 20, 0, 0, -20, -20, 0, 0, 25, 25, 0, 0, -25, -25, 0],
     [0, 30, 0, -65, -25, 0, 70, 0, -90, 20, 0, -35, 75, 0, -20, 0],
-    [0, 55, -70, 50, -85, 0, 80, -60, 70, -55, 0, -90, 75, -70, 45, 0],
+    [0, 45, -60, 40, -70, 0, 65, -50, 60, -45, 0, -75, 60, -60, 40, 0],
 ]
 TRACK_HILLS = [
     [0, 0, 8, 8, 0, 0, -8, -8, 0, 0, 12, 0, 0, -8, 0, 0],
@@ -193,10 +200,10 @@ class Model:
                 if s.state == RACE:
                     s.lap_done()
         t = TRACKS[1 if brk == "track" else s.track][s.seg]
-        if s.curve < t:
-            s.curve = min(s.curve + 2, t)
+        if s.curve < t:                         # CURVE_EASE: the car feels the drawn bend within ~11 frames
+            s.curve = min(s.curve + 8, t)
         elif s.curve > t:
-            s.curve = max(s.curve - 2, t)
+            s.curve = max(s.curve - 8, t)
         th = TRACK_HILLS[s.track][s.seg]
         if s.hill < th:
             s.hill += 1
@@ -207,8 +214,7 @@ class Model:
             push = (s.curve * s.speed) >> 5
             push += (push * s.diff) >> 2
         else:                                   # centrifugal: curve * speed^2, up to x1.5 on later laps
-            push = (s.curve * ((min(s.speed, cap) ** 3) >> 11)) >> 3
-            push -= push >> 3
+            push = (s.curve * cube_q(s.speed, cap)) >> 3
             push += (push * s.diff) >> 3
             push += (push * (s.level - 1)) >> 2
             push = max(-1600, min(1600, push))
@@ -515,7 +521,7 @@ def bot(mode):
         if m.seg_pos > SEG_LENS[m.track] // 2:
             w_ = max(w_, abs(TRACKS[m.track][(m.seg + 1) % 16]))
         vs_ = 80
-        while vs_ > 20 and (w_ * ((vs_ ** 3) >> 11) >> 3) > 1.5 * (160 + 4 * vs_):
+        while vs_ > 20 and (w_ * cube_q(vs_, 80) >> 3) > 1.5 * (160 + 4 * vs_):
             vs_ -= 1
         if sp_ < vs_ - 1: want.add("a")
         elif sp_ > vs_ + 1: want.add("b")

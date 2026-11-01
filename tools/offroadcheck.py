@@ -41,7 +41,7 @@ def on_update(_):
         mem[syms["_g_diff"]] = 0
         wr16("_g_speed", 80)
         wr16("_g_curve", 90)
-        wr16("_g_vcurve", 90)
+        mem[syms["_g_vcurve"]] = 90                 # int8
         wr16("_g_cam", 0)
         S["phase"] = "measure"
     elif S["phase"] == "measure":

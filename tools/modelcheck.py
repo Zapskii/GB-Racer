@@ -46,7 +46,7 @@ def u16(n): return mem[syms[n]] | (mem[syms[n] + 1] << 8)
 
 def model(p):
     """{addr: value} for every byte the builder is expected to write."""
-    s, ds, cur = p["s"], p["ds"], p["cur"]
+    s, ds, cur, cur2, cur3, split = p["s"], p["ds"], p["cur"], p["cur2"], p["cur3"], p["split"]
     if broken:
         cur = (cur + 1) & 0xFFFF
     out, e = {}, p["scx"]
@@ -55,6 +55,9 @@ def model(p):
             out[e] = s >> 8
             s = (s + ds) & 0xFFFF
             e = (e & 0xFF00) | ((e - 1) & 0xFF)       # the asm only decrements E
+        split = (split - 1) & 0xFF                    # after bt_split chunks: the blended chunk, then the next bend
+        if split == 0:
+            cur, cur2, split = cur2, cur3, 1
         ds = (ds + cur) & 0xFFFF
     return out
 
@@ -96,6 +99,7 @@ def on_entry(_ctx):
             state["bad_bytes"] += bad
             state["first_bad"] = state["first_bad"] or (state["checked"], bad)
     state["prev"] = {"s": u16("_bt_s"), "ds": u16("_bt_ds"), "cur": u16("_bt_curve"),
+                     "cur2": u16("_bt_curve2"), "cur3": u16("_bt_curve3"), "split": u8("_bt_split"), 
                      "scx": u16("_bt_scx")}
 
 pb.hook_register(0, syms["_build_tables_asm"], on_entry, None)
