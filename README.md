@@ -6,7 +6,8 @@ assembly with the GBDK-2020 toolchain.  64 KB ROM, MBC1 + 8 KB battery-backed sa
 Three tracks (OVAL, CANYON, ALPINE), three race lengths (3/5/10 laps), three difficulty levels,
 two racing rivals plus random traffic, lap times and per-track/level/length records.
 
-Current release: tag **v1.1**; the full PyBoy suite (`make test`) passes.
+Current release: tag **v1.2** (bends you can see coming, an honest corner sign, a fairer
+ALPINE); the full PyBoy suite (`make test`) passes.
 
 ## Controls
 
@@ -126,7 +127,7 @@ bench/          cycle benchmark (development artifact; see bench/Makefile)
 ### Memory map
 
 - Bank 0: code and runtime data (`src/sram.c` is in bank 1 via `BANKED` calls, made only with the road ISR off).  Must end below `$4000` (`tools/romcheck.py`), with at least
-  64 bytes headroom; the current build has 163 bytes free.
+  64 bytes headroom; the current build has 294 bytes free.
 - Bank 1: boot-time data (road/sprite/font), the full-screen menu code (`src/menus.c`) and the
   CANYON palette rows at `$6000`.
 - Banks 2/3: OVAL/ALPINE palette rows at `$6000`.
