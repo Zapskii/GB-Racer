@@ -1,4 +1,4 @@
-[Play online at retro.zapski.com](https://retro.zapski.com)
+🎮 [Play online](https://retro.zapski.com/play/gb-racer) · 📖 [Read the review](https://retro.zapski.com/blog/gb-racer-game-boy-review) · [retro.zapski.com](https://retro.zapski.com)
 
 # GB Racer
 
